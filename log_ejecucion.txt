@@ -1,0 +1,14 @@
+2026-09-25 04:33:26 | BCRP PN31883GM (ingreso_formal_nominal) | HTTP 200 | filas=72 | https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PN31883GM/json/2020-1/2025-12
+2026-09-25 04:33:26 | BCRP PN31883GM | Nombre oficial: Puestos de trabajo e ingresos del sector formal - Ingresos promedio del sector formal total nominal (S/)
+2026-09-25 04:33:26 | BCRP PD04722MM (tasa_referencia) | HTTP 200 | filas=72 | https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PD04722MM/json/2020-1/2025-12
+2026-09-25 04:33:26 | BCRP PD04722MM | Nombre oficial: Tasas de interés del Banco Central de Reserva - Tasa de Referencia de la Política Monetaria
+2026-09-25 04:33:27 | BCRP PN38705PM (ipc_lima) | HTTP 200 | filas=72 | https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PN38705PM/json/2020-1/2025-12
+2026-09-25 04:33:27 | BCRP PN38705PM | Nombre oficial: Índice de precios Lima Metropolitana (índice Dic.2021 = 100) - Índice de Precios al Consumidor (IPC)
+2026-09-25 04:33:27 | BCRP CONSOLIDADO | HTTP 200 | filas=216 | archivo=datos_crudos_2024200498D_bcrp.csv
+2026-09-25 14:11:15 | BCRP PN31883GM (ingreso_formal_nominal) | HTTP 200 | filas=72 | https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PN31883GM/json/2020-1/2025-12
+2026-09-25 14:11:15 | BCRP PN31883GM | Nombre oficial: Puestos de trabajo e ingresos del sector formal - Ingresos promedio del sector formal total nominal (S/)
+2026-09-25 14:11:15 | BCRP PD04722MM (tasa_referencia) | HTTP 200 | filas=72 | https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PD04722MM/json/2020-1/2025-12
+2026-09-25 14:11:15 | BCRP PD04722MM | Nombre oficial: Tasas de interés del Banco Central de Reserva - Tasa de Referencia de la Política Monetaria
+2026-09-25 14:11:16 | BCRP PN38705PM (ipc_lima) | HTTP 200 | filas=72 | https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PN38705PM/json/2020-1/2025-12
+2026-09-25 14:11:16 | BCRP PN38705PM | Nombre oficial: Índice de precios Lima Metropolitana (índice Dic.2021 = 100) - Índice de Precios al Consumidor (IPC)
+2026-09-25 14:11:16 | BCRP CONSOLIDADO | HTTP 200 | filas=216 | archivo=datos_crudos_2024200498D_bcrp.csv
