@@ -1,0 +1,35 @@
+encabezado_original,nombre_limpio,referencia_nota,tipo_columna,primer_periodo,ultimo_periodo,apariciones
+AVLA Perú,AVLA Perú,,empresa,2020-01,2025-12,144
+AuguStar,AuguStar,,empresa,2025-11,2025-12,4
+Cardif,Cardif,,empresa,2020-01,2025-12,144
+Cesce Perú,Cesce Perú,,empresa,2025-05,2025-12,16
+Chubb Seguros,Chubb Seguros,,empresa,2020-01,2025-12,144
+Coface Seguros,Coface Seguros,,empresa,2020-01,2020-11,22
+Coface Seguros (2),Coface Seguros,2,empresa,2020-12,2020-12,2
+Crecer Seguros,Crecer Seguros,,empresa,2020-01,2025-12,144
+Insur,Insur,,empresa,2020-01,2025-12,144
+Interseguro,Interseguro,,empresa,2020-01,2025-12,144
+La Positiva,La Positiva,,empresa,2020-01,2025-12,144
+La Positiva Vida,La Positiva Vida,,empresa,2020-01,2025-12,144
+Liberty Seguros,Liberty Seguros,,empresa,2020-01,2025-12,144
+Mapfre Perú,Mapfre Perú,,empresa,2020-01,2025-12,130
+Mapfre Perú (1),Mapfre Perú,1,empresa,2022-06,2022-12,14
+Mapfre Perú (abs) (2),Mapfre Perú (abs),2,empresa,2022-06,2022-12,14
+Mapfre Perú Vida,Mapfre Perú Vida,,empresa,2020-01,2022-05,58
+Ohio National Vida,Ohio National Vida,,empresa,2020-01,2025-10,140
+Pacífico Seguros,Pacífico Seguros,,empresa,2020-01,2025-12,144
+Protecta,Protecta,,empresa,2020-01,2025-12,144
+Qualitas,Qualitas,,empresa,2020-01,2023-09,90
+Quálitas,Quálitas,,empresa,2023-10,2025-12,54
+Rigel,Rigel,,empresa,2020-01,2020-05,10
+Rigel (1),Rigel,1,empresa,2020-06,2020-12,14
+Rímac,Rímac,,empresa,2020-01,2025-12,144
+Secrex,Secrex,,empresa,2020-01,2025-04,128
+Total,Total,,total_sistema,2020-01,2025-12,144
+Total + Mapfre Perú (abs) (3),Total + Mapfre Perú (abs),3,agregada,2022-06,2022-12,14
+Total + Rigel (2),Total + Rigel,2,agregada,2020-06,2020-11,6
+Total + Rigel + Coface Seguros (3),Total + Rigel + Coface Seguros,3,agregada,2020-12,2020-12,1
+Total +Rigel (2),Total +Rigel,2,agregada,2020-06,2020-11,6
+Total +Rigel + Coface Seguros (3),Total +Rigel + Coface Seguros,3,agregada,2020-12,2020-12,1
+Vida Cámara,Vida Cámara,,empresa,2020-01,2020-12,24
+Vivir Seguros,Vivir Seguros,,empresa,2021-01,2025-12,120
