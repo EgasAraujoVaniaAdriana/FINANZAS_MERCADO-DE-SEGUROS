@@ -88,3 +88,4 @@
 2026-09-25 19:23:30 | SBS S-401 2025-12 | HTTP 200 | filas_primera_hoja=78 | bytes=88576 | sha256=d67841508d75301ec9d6f73bd7bafda08616b7dd7bcdfd83ae64c5fbb04f2e75 | archivo=sbs_S-401_2025-12_2024200498D.xls | https://intranet2.sbs.gob.pe/estadistica/financiera/2025/Diciembre/S-401-di2025.XLS
 2026-09-25 19:23:30 | SBS S-401 CONTROL | archivos=72 de 72
 2026-09-27 04:28:28 | PROCESADO datos_procesados_2024200498D.csv | filas=1277 | columnas=22 | muestra_modelo=1253 | sha256=1140aef804a470d1053b1c18a05737e5b0af741606222976c755d0753a51a0e7
+2026-09-27 18:55:41 | PROCESADO datos_procesados_2024200498D.csv | filas=1277 | columnas=18 | muestra_modelo=1254 | sha256=1ec0fcb5bdc6d16695b94973b1de459b02c2420ea79549a8b8bfc4128911beb8

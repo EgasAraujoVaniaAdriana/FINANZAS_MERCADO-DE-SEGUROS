@@ -2,21 +2,57 @@
 # Código de matrícula: 2024200498D
 # Tema: N.º 15 del temario — Determinantes de las primas cedidas, el ingreso formal y la tasa de referencia en las primas netas del mercado asegurador peruano (2020-2025)
 # Fecha de extracción: 2026-09-25
+
 """
 SCRIPT 03 — LIMPIEZA, TRANSFORMACIÓN E INTEGRACIÓN DE DATOS
 
-Unidad de análisis: empresa × mes, 2020-01 a 2025-12.
-- P009 = primas netas acumuladas por empresa.
-- P010 = primas cedidas acumuladas por empresa.
-- Se toma únicamente la fila TOTAL de cada empresa; no se trabaja por ramo.
-- Los crudos no se modifican.
-- Los cambios de denominación solo se homologan cuando existe evidencia explícita
-  en los pies de página SBS y continuidad temporal verificable.
-- Fusiones/absorciones se documentan, pero no se convierten automáticamente en
-  una continuidad histórica.
-- Enero mensual = enero acumulado; feb-dic = acumulado actual - acumulado previo.
-- Los montos reales de primas se conservan en MILES de soles de dic-2021.
-- Ceros, negativos y faltantes se conservan; los outliers solo se diagnostican.
+Unidad de análisis:
+    Empresa × mes, desde 2020-01 hasta 2025-12.
+
+Fuentes:
+    - SBS: primas netas y primas cedidas del formato S-401.
+    - BCRP: ingreso formal, tasa de referencia e IPC.
+
+Tratamiento SBS:
+    - P009 corresponde a primas netas acumuladas por empresa.
+    - P010 corresponde a primas cedidas acumuladas por empresa.
+    - Se utiliza únicamente la fila TOTAL de cada empresa.
+    - No se trabaja por ramo.
+    - Los archivos crudos no se modifican.
+    - Enero mensual equivale al acumulado de enero.
+    - De febrero a diciembre:
+          mensual = acumulado actual - acumulado del mes anterior.
+    - Si falta el mes anterior, el flujo mensual no se inventa.
+
+Identidad empresarial:
+    - Se construye un id_empresa estable para cada trayectoria.
+    - La normalización de nombres permite detectar variantes de escritura,
+      pero no determina por sí sola la identidad de una empresa.
+    - Las variantes de nombre se contrastan con continuidad temporal y
+      evidencia de la SBS.
+    - Los cambios simples de denominación mantienen una misma trayectoria
+      cuando existe continuidad verificable.
+    - Las fusiones y absorciones se tratan separadamente y no se confunden
+      con simples cambios de nombre.
+    - La columna empresa contiene una etiqueta analítica estable para
+      tablas y gráficos.
+    - El nombre original observado en SBS se conserva durante el proceso
+      para realizar controles de trazabilidad.
+
+Transformaciones:
+    - Las primas se expresan en miles de soles reales de diciembre de 2021.
+    - El ingreso formal se expresa en soles reales de diciembre de 2021.
+    - Los logaritmos se calculan solo para valores estrictamente positivos.
+    - Ceros, negativos y faltantes se conservan.
+    - Los outliers se diagnostican, pero no se eliminan ni winsorizan.
+
+Salida:
+    - El Script 03 genera:
+      datos_procesados/datos_procesados_2024200498D.csv
+    - Los controles del proceso se muestran durante la ejecución y se
+      registran en log_ejecucion.txt.
+    - La carpeta /salidas se reserva para los resultados generados
+      posteriormente por el Script 04.
 """
 
 
@@ -35,51 +71,162 @@ import pandas as pd
 
 
 # =============================================================================
-# BLOQUE 2. PARÁMETROS Y RUTAS
+# BLOQUE 2. PARÁMETROS, VARIABLES Y RUTAS RELATIVAS
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# 2.1. Ventana temporal congelada
+# -----------------------------------------------------------------------------
+# El análisis utiliza exactamente enero de 2020 a diciembre de 2025.
 FECHA_INICIO = "2020-01"
 FECHA_CORTE = "2025-12"
 MESES_ESPERADOS = 72
+
 MATRICULA = "2024200498D"
 
+
+# -----------------------------------------------------------------------------
+# 2.2. Series BCRP utilizadas
+# -----------------------------------------------------------------------------
+# PN31883GM : ingreso promedio del sector formal
+# PD04722MM : tasa de referencia del BCRP
+# PN38705PM : IPC, base diciembre 2021 = 100
 COD_INGRESO = "PN31883GM"
 COD_TASA = "PD04722MM"
 COD_IPC = "PN38705PM"
 
-HOJAS = {"P009": "primas_netas", "P010": "primas_cedidas"}
-ROTULO_ENCABEZADO = r"RIESGOS\s*/\s*EMPRESAS"
-ROTULOS_TOTAL_SISTEMA = {"TOTAL", "TOTAL GENERAL", "TOTAL SISTEMA", "TOTAL SISTEMA ASEGURADOR"}
-ROTULOS_TOTAL_FILA = {"TOTAL", "TOTAL GENERAL"}
 
-MINIMO_OBSERVACIONES = 1000
-TOLERANCIA = 1.0  # miles de S/; tolerancia para redondeos de la fuente
-
-MESES_BCRP = {
-    "ENE": 1, "FEB": 2, "MAR": 3, "ABR": 4, "MAY": 5, "JUN": 6,
-    "JUL": 7, "AGO": 8, "SEP": 9, "SET": 9, "OCT": 10, "NOV": 11, "DIC": 12,
+# -----------------------------------------------------------------------------
+# 2.3. Hojas del formato SBS S-401
+# -----------------------------------------------------------------------------
+HOJAS = {
+    "P009": "primas_netas",
+    "P010": "primas_cedidas",
 }
 
+ROTULO_ENCABEZADO = r"RIESGOS\s*/\s*EMPRESAS"
+
+ROTULOS_TOTAL_SISTEMA = {
+    "TOTAL",
+    "TOTAL GENERAL",
+    "TOTAL SISTEMA",
+    "TOTAL SISTEMA ASEGURADOR",
+}
+
+ROTULOS_TOTAL_FILA = {
+    "TOTAL",
+    "TOTAL GENERAL",
+}
+
+
+# -----------------------------------------------------------------------------
+# 2.4. Parámetros de control
+# -----------------------------------------------------------------------------
+MINIMO_OBSERVACIONES = 1000
+
+# Miles de soles.
+# Se admite esta diferencia únicamente para controles de redondeo de la fuente.
+TOLERANCIA = 1.0
+
+
+# -----------------------------------------------------------------------------
+# 2.5. Meses utilizados por las series del BCRP
+# -----------------------------------------------------------------------------
+MESES_BCRP = {
+    "ENE": 1,
+    "FEB": 2,
+    "MAR": 3,
+    "ABR": 4,
+    "MAY": 5,
+    "JUN": 6,
+    "JUL": 7,
+    "AGO": 8,
+    "SEP": 9,
+    "SET": 9,
+    "OCT": 10,
+    "NOV": 11,
+    "DIC": 12,
+}
+
+
+# -----------------------------------------------------------------------------
+# 2.6. Columnas de la base procesada final
+# -----------------------------------------------------------------------------
+# empresa_sbs se conserva durante la limpieza para trazabilidad,
+# pero NO se exporta a datos_procesados.
+#
+# estado_p009_p010 y los flags de huecos son controles internos del
+# procedimiento y tampoco forman parte de la base analítica final.
+#
+# id_observacion se incorpora posteriormente, antes del guardado.
 COLUMNAS_FINALES = [
-    "periodo", "id_empresa", "empresa", "empresa_sbs", "estado_p009_p010",
-    "primas_netas_acum_sbs", "primas_netas_mensual_nominal",
-    "primas_netas_mensual_real", "log_primas_reales",
-    "primas_cedidas_acum_sbs", "primas_cedidas_mensual_nominal",
-    "primas_cedidas_mensual_real", "log_primas_cedidas",
-    "ingreso_formal_nominal", "ingreso_real", "log_ingreso_real",
-    "tasa_referencia", "ipc",
-    "flag_hueco_netas", "flag_hueco_cedidas", "muestra_modelo",
+    "periodo",
+    "id_empresa",
+    "empresa",
+
+    # SBS: primas netas
+    "primas_netas_acum_sbs",
+    "primas_netas_mensual_nominal",
+    "primas_netas_mensual_real",
+    "log_primas_reales",
+
+    # SBS: primas cedidas
+    "primas_cedidas_acum_sbs",
+    "primas_cedidas_mensual_nominal",
+    "primas_cedidas_mensual_real",
+    "log_primas_cedidas",
+
+    # BCRP
+    "ingreso_formal_nominal",
+    "ingreso_real",
+    "log_ingreso_real",
+    "tasa_referencia",
+    "ipc",
+
+    # Indicador para seleccionar la muestra en el Script 04
+    "muestra_modelo",
 ]
 
+
+# -----------------------------------------------------------------------------
+# 2.7. Rutas relativas
+# -----------------------------------------------------------------------------
+# No se incluyen rutas de Google Drive ni de Colab dentro del script.
+# RAIZ corresponde automáticamente a la carpeta N.º 3 del proyecto.
 RAIZ = Path(__file__).resolve().parent.parent
+
 CARPETA_CRUDOS = RAIZ / "datos_crudos"
 CARPETA_PROC = RAIZ / "datos_procesados"
+
+# /salidas se reserva para tablas y figuras del Script 04.
 CARPETA_SALIDAS = RAIZ / "salidas"
+
 ARCHIVO_LOG = RAIZ / "log_ejecucion.txt"
-ARCHIVO_CONTROL = CARPETA_SALIDAS / "control_03_limpieza.txt"
 
-CARPETA_PROC.mkdir(parents=True, exist_ok=True)
-CARPETA_SALIDAS.mkdir(parents=True, exist_ok=True)
 
+# -----------------------------------------------------------------------------
+# 2.8. Codificación de archivos CSV
+# -----------------------------------------------------------------------------
+# UTF-8 con BOM permite abrir los CSV directamente en Excel conservando
+# correctamente tildes, eñes y otros caracteres.
+CSV_ENCODING = "utf-8-sig"
+
+
+# -----------------------------------------------------------------------------
+# 2.9. Preparación de carpetas
+# -----------------------------------------------------------------------------
+CARPETA_PROC.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+CARPETA_SALIDAS.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+
+# Acumula los mensajes que posteriormente se registrarán en el log.
 REPORTE = []
 
 
@@ -489,28 +636,80 @@ def cargar_sbs(guardar_auditoria=True):
 
 
 # =============================================================================
-# BLOQUE 6. PIES DE PÁGINA DE LA SBS
+# BLOQUE 6. EXTRACCIÓN DE PIES DE PÁGINA DE LA SBS
 # =============================================================================
-def extraer_notas(df, fila_tot, periodo, hoja, nombre_archivo):
+# Los pies de página se extraen porque contienen información útil para
+# interpretar cambios de denominación, fusiones, absorciones y otros eventos.
+#
+# Se utilizan durante el procesamiento del Script 03, pero NO se exportan
+# como archivos independientes a /salidas.
+# =============================================================================
+
+
+def extraer_notas(
+    df,
+    fila_tot,
+    periodo,
+    hoja,
+    nombre_archivo
+):
     """
-    Conserva una nota COMPLETA por fila debajo de TOTAL y registra las columnas
-    que aportaron texto. Esto evita fragmentar una misma nota en varias celdas.
+    Extrae las notas ubicadas debajo de la fila TOTAL de cada hoja SBS.
+
+    Cada fila de nota se conserva completa para no separar una misma
+    explicación entre varias celdas.
+
+    La información se mantiene en memoria y sirve posteriormente para
+    verificar eventos empresariales y registros especiales.
     """
+
     notas = []
-    for i in range(fila_tot + 1, len(df)):
+
+    for i in range(
+        fila_tot + 1,
+        len(df)
+    ):
+
         partes = []
         columnas = []
+
         for c in df.columns:
+
             valor = df.at[i, c]
-            if isinstance(valor, str) and valor.strip():
-                texto = re.sub(r"\s+", " ", valor.strip())
-                partes.append(texto)
-                columnas.append(letra_columna(c))
+
+            if (
+                isinstance(valor, str)
+                and valor.strip()
+            ):
+
+                texto = re.sub(
+                    r"\s+",
+                    " ",
+                    valor.strip()
+                )
+
+                partes.append(
+                    texto
+                )
+
+                columnas.append(
+                    letra_columna(c)
+                )
+
+        # Si la fila no contiene texto, se ignora.
         if not partes:
             continue
-        # Evita repetir exactamente la misma pieza dentro de la fila.
-        partes = list(dict.fromkeys(partes))
-        nota = " | ".join(partes)
+
+        # Evitar duplicar exactamente la misma pieza
+        # cuando aparece repetida en una fila.
+        partes = list(
+            dict.fromkeys(partes)
+        )
+
+        nota = " | ".join(
+            partes
+        )
+
         notas.append({
             "periodo": periodo,
             "hoja": hoja,
@@ -521,39 +720,77 @@ def extraer_notas(df, fila_tot, periodo, hoja, nombre_archivo):
             "referencias_detectadas": referencias_en_texto(nota),
             "archivo_origen": nombre_archivo,
         })
+
     return notas
 
 
-def guardar_notas(notas):
-    ruta = CARPETA_SALIDAS / "notas_sbs_s401.csv"
-    if notas.empty:
-        pd.DataFrame(columns=["periodo", "hoja", "fila_excel", "columnas_texto",
-                              "nota_original", "nota_normalizada", "referencias_detectadas",
-                              "archivo_origen"]).to_csv(ruta, index=False, encoding="utf-8")
-        reportar("Pies de página SBS: no se encontraron textos debajo de TOTAL.")
+def resumir_notas(notas):
+    """
+    Resume en consola las notas encontradas.
+
+    No crea archivos en /salidas.
+    Las notas continúan disponibles en memoria para los controles
+    de identidad empresarial y eventos societarios.
+    """
+
+    if notas is None or notas.empty:
+
+        reportar(
+            "Pies de página SBS: "
+            "no se encontraron textos debajo de TOTAL."
+        )
+
         return
-    notas.to_csv(ruta, index=False, encoding="utf-8")
-    reportar(f"Pies de página SBS: {len(notas):,} filas de nota; "
-             f"{notas['nota_normalizada'].nunique():,} textos normalizados distintos.")
+
+    total_notas = len(
+        notas
+    )
+
+    textos_distintos = (
+        notas[
+            "nota_normalizada"
+        ]
+        .nunique()
+    )
+
+    con_referencia = (
+        notas[
+            "referencias_detectadas"
+        ]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .ne("")
+        .sum()
+    )
+
+    reportar(
+        "Pies de página SBS: "
+        f"{total_notas:,} filas extraídas; "
+        f"{textos_distintos:,} textos normalizados distintos; "
+        f"{con_referencia:,} filas con referencia detectada."
+    )
 
 
 # =============================================================================
 # BLOQUE 6B. DEPURACIÓN DE REGISTROS ESPECIALES SBS
 # =============================================================================
-# Algunas columnas de los XLS parecen empresas por su estructura, pero las
-# notas al pie pueden indicar que son registros transitorios de una empresa
-# absorbida y no una empresa activa del periodo.
+# Algunas columnas de los XLS tienen apariencia de empresa, pero las notas
+# al pie pueden indicar que representan flujos históricos/transitorios de una
+# empresa absorbida y no una empresa activa independiente del periodo.
 #
 # Regla:
-# - NO se codifican nombres de empresas manualmente.
-# - La reclasificación exige evidencia conjunta del encabezado y de la nota SBS.
-# - El registro especial se conserva para auditoría.
-# - No entra en la base principal empresa × mes.
+# - No se codifican manualmente nombres de empresas.
+# - La reclasificación exige evidencia conjunta del encabezado y la nota SBS.
+# - El registro especial se conserva en memoria para control y trazabilidad.
+# - No entra en el panel principal empresa × mes.
+# - Este bloque NO genera archivos en /salidas.
 # =============================================================================
 
 
 def _refs_a_set(valor):
-    """Convierte '1;2' en {'1', '2'} y maneja vacíos."""
+    """Convierte '1;2' en {'1', '2'} y maneja valores vacíos."""
+
     if pd.isna(valor):
         return set()
 
@@ -564,18 +801,22 @@ def _refs_a_set(valor):
     }
 
 
-def _es_registro_absorbida_transitorio(nombre_limpio, nota_original):
+def _es_registro_absorbida_transitorio(
+    nombre_limpio,
+    nota_original
+):
     """
     Identifica una columna especial correspondiente a flujos históricos
     de una empresa absorbida.
 
-    No usa nombres específicos de compañías.
+    No utiliza nombres específicos de compañías.
 
-    Exige:
-    1. que el encabezado tenga la marca '(abs)';
-    2. que la nota hable de FLUJOS;
-    3. que la nota mencione una FUSIÓN;
-    4. que indique que esos flujos pertenecen al periodo anterior a la fusión.
+    Exige conjuntamente:
+    1. encabezado con marca "(abs)";
+    2. nota que hable de flujos;
+    3. nota que mencione una fusión;
+    4. nota que indique que los flujos corresponden al periodo
+       anterior a la fusión.
     """
 
     nombre = str(nombre_limpio)
@@ -589,8 +830,13 @@ def _es_registro_absorbida_transitorio(nombre_limpio, nota_original):
         )
     )
 
-    habla_de_flujos = "FLUJOS" in nota
-    habla_de_fusion = "FUSION" in nota
+    habla_de_flujos = (
+        "FLUJOS" in nota
+    )
+
+    habla_de_fusion = (
+        "FUSION" in nota
+    )
 
     habla_periodo_previo = any(
         expresion in nota
@@ -618,8 +864,13 @@ def depurar_registros_especiales(
     guardar_auditoria=True
 ):
     """
-    Reclasifica columnas inicialmente leídas como empresa cuando la propia
-    evidencia SBS demuestra que son registros transitorios de una absorbida.
+    Reclasifica columnas inicialmente leídas como empresas cuando la
+    evidencia de la SBS demuestra que son registros transitorios de una
+    empresa absorbida.
+
+    El parámetro guardar_auditoria se conserva para compatibilidad con el
+    flujo general del Script 03, pero este bloque ya no escribe archivos
+    en /salidas.
 
     Devuelve:
         sbs_filtrado
@@ -629,13 +880,15 @@ def depurar_registros_especiales(
     """
 
     columnas_empresa = columnas_df[
-        columnas_df["tipo_columna"].eq("empresa")
+        columnas_df[
+            "tipo_columna"
+        ].eq("empresa")
     ].copy()
 
     registros = []
 
     # -------------------------------------------------------------------------
-    # 1. Vincular cada encabezado empresarial con su nota mediante
+    # 1. Vincular cada encabezado empresarial con su nota mediante:
     #    periodo + hoja + referencia.
     # -------------------------------------------------------------------------
     for _, col in columnas_empresa.iterrows():
@@ -648,17 +901,26 @@ def depurar_registros_especiales(
             continue
 
         notas_periodo = notas[
-            notas["periodo"].eq(col["periodo"])
-            & notas["hoja"].eq(col["hoja"])
+            notas["periodo"].eq(
+                col["periodo"]
+            )
+            & notas["hoja"].eq(
+                col["hoja"]
+            )
         ]
 
         for _, nota in notas_periodo.iterrows():
 
             refs_nota = _refs_a_set(
-                nota["referencias_detectadas"]
+                nota[
+                    "referencias_detectadas"
+                ]
             )
 
-            if not (refs_columna & refs_nota):
+            if not (
+                refs_columna
+                & refs_nota
+            ):
                 continue
 
             if _es_registro_absorbida_transitorio(
@@ -667,23 +929,48 @@ def depurar_registros_especiales(
             ):
 
                 registros.append({
-                    "periodo": col["periodo"],
-                    "hoja": col["hoja"],
-                    "columna_excel": col["columna_excel"],
-                    "encabezado_original": col["encabezado_original"],
-                    "empresa_sbs": col["nombre_limpio"],
-                    "referencia_nota": col["referencia_nota"],
-                    "tipo_inicial": "empresa",
-                    "tipo_definitivo": "registro_especial_absorcion",
-                    "entra_panel": False,
+                    "periodo":
+                        col["periodo"],
+
+                    "hoja":
+                        col["hoja"],
+
+                    "columna_excel":
+                        col["columna_excel"],
+
+                    "encabezado_original":
+                        col["encabezado_original"],
+
+                    "empresa_sbs":
+                        col["nombre_limpio"],
+
+                    "referencia_nota":
+                        col["referencia_nota"],
+
+                    "tipo_inicial":
+                        "empresa",
+
+                    "tipo_definitivo":
+                        "registro_especial_absorcion",
+
+                    "entra_panel":
+                        False,
+
                     "motivo": (
-                        "La nota SBS identifica flujos de una empresa "
-                        "absorbida correspondientes al periodo previo "
-                        "a la fusión."
+                        "La nota SBS identifica flujos "
+                        "de una empresa absorbida "
+                        "correspondientes al periodo "
+                        "previo a la fusión."
                     ),
-                    "nota_sbs": nota["nota_original"],
-                    "fila_nota_excel": nota["fila_excel"],
-                    "archivo_origen": nota["archivo_origen"],
+
+                    "nota_sbs":
+                        nota["nota_original"],
+
+                    "fila_nota_excel":
+                        nota["fila_excel"],
+
+                    "archivo_origen":
+                        nota["archivo_origen"],
                 })
 
     columnas_salida = [
@@ -707,60 +994,93 @@ def depurar_registros_especiales(
         columns=columnas_salida
     )
 
+    # -------------------------------------------------------------------------
+    # 2. Si se encontraron registros especiales, comprobar consistencia.
+    # -------------------------------------------------------------------------
     if not especiales.empty:
 
         especiales = (
             especiales
             .drop_duplicates(
-                ["periodo", "hoja", "empresa_sbs"]
+                [
+                    "periodo",
+                    "hoja",
+                    "empresa_sbs",
+                ]
             )
             .sort_values(
-                ["periodo", "empresa_sbs", "hoja"]
+                [
+                    "periodo",
+                    "empresa_sbs",
+                    "hoja",
+                ]
             )
-            .reset_index(drop=True)
+            .reset_index(
+                drop=True
+            )
         )
 
-        # ---------------------------------------------------------------------
-        # 2. Control: si un registro se identifica como especial, todas las
-        #    hojas en las que esa misma columna empresarial esté presente
-        #    deben concordar.
-        # ---------------------------------------------------------------------
-        claves = especiales[
-            ["periodo", "empresa_sbs"]
-        ].drop_duplicates()
+        claves = (
+            especiales[
+                [
+                    "periodo",
+                    "empresa_sbs",
+                ]
+            ]
+            .drop_duplicates()
+        )
 
         for _, clave in claves.iterrows():
 
-            periodo = clave["periodo"]
-            empresa = clave["empresa_sbs"]
+            periodo = clave[
+                "periodo"
+            ]
+
+            empresa = clave[
+                "empresa_sbs"
+            ]
 
             hojas_presentes = set(
                 largo.loc[
-                    largo["periodo"].eq(periodo)
-                    & largo["empresa_sbs"].eq(empresa),
+                    largo[
+                        "periodo"
+                    ].eq(periodo)
+                    & largo[
+                        "empresa_sbs"
+                    ].eq(empresa),
                     "hoja"
                 ]
             )
 
             hojas_especiales = set(
                 especiales.loc[
-                    especiales["periodo"].eq(periodo)
-                    & especiales["empresa_sbs"].eq(empresa),
+                    especiales[
+                        "periodo"
+                    ].eq(periodo)
+                    & especiales[
+                        "empresa_sbs"
+                    ].eq(empresa),
                     "hoja"
                 ]
             )
 
-            if hojas_presentes != hojas_especiales:
+            if (
+                hojas_presentes
+                != hojas_especiales
+            ):
+
                 raise RuntimeError(
-                    "Clasificación especial inconsistente para "
-                    f"{empresa} en {periodo}. "
-                    f"Hojas presentes={sorted(hojas_presentes)}; "
+                    "Clasificación especial inconsistente "
+                    f"para {empresa} en {periodo}. "
+                    f"Hojas presentes="
+                    f"{sorted(hojas_presentes)}; "
                     f"hojas clasificadas como especiales="
                     f"{sorted(hojas_especiales)}."
                 )
 
         # ---------------------------------------------------------------------
-        # 3. Incorporar los valores originales a la tabla de auditoría.
+        # 3. Incorporar los valores originales únicamente al DataFrame
+        #    de control que permanece en memoria.
         # ---------------------------------------------------------------------
         valores = largo[
             [
@@ -775,14 +1095,17 @@ def depurar_registros_especiales(
 
         especiales = especiales.merge(
             valores,
-            on=["periodo", "hoja", "empresa_sbs"],
+            on=[
+                "periodo",
+                "hoja",
+                "empresa_sbs",
+            ],
             how="left",
             validate="one_to_one"
         )
 
         # ---------------------------------------------------------------------
-        # 4. Excluirlos únicamente del panel empresarial.
-        #    NO se borran de la auditoría.
+        # 4. Excluir registros especiales del panel empresa × mes.
         # ---------------------------------------------------------------------
         claves_excluir = set(
             zip(
@@ -800,9 +1123,13 @@ def depurar_registros_especiales(
         )
 
         largo_filtrado = (
-            largo.loc[~mascara_largo]
+            largo.loc[
+                ~mascara_largo
+            ]
             .copy()
-            .reset_index(drop=True)
+            .reset_index(
+                drop=True
+            )
         )
 
         mascara_sbs = sbs.apply(
@@ -814,24 +1141,38 @@ def depurar_registros_especiales(
         )
 
         sbs_filtrado = (
-            sbs.loc[~mascara_sbs]
+            sbs.loc[
+                ~mascara_sbs
+            ]
             .copy()
-            .reset_index(drop=True)
+            .reset_index(
+                drop=True
+            )
         )
 
     else:
 
-        largo_filtrado = largo.copy()
-        sbs_filtrado = sbs.copy()
+        largo_filtrado = (
+            largo.copy()
+        )
+
+        sbs_filtrado = (
+            sbs.copy()
+        )
 
     # -------------------------------------------------------------------------
     # 5. Reconstruir comparación P009-P010 después de quitar especiales.
     # -------------------------------------------------------------------------
     presencia = (
         largo_filtrado
-        .assign(presente=1)
+        .assign(
+            presente=1
+        )
         .pivot_table(
-            index=["periodo", "empresa_sbs"],
+            index=[
+                "periodo",
+                "empresa_sbs",
+            ],
             columns="variable",
             values="presente",
             aggfunc="max",
@@ -844,21 +1185,41 @@ def depurar_registros_especiales(
 
     for variable in [
         "primas_netas",
-        "primas_cedidas"
+        "primas_cedidas",
     ]:
-        if variable not in presencia.columns:
-            presencia[variable] = 0
 
-    presencia["estado_p009_p010"] = np.select(
+        if (
+            variable
+            not in presencia.columns
+        ):
+            presencia[
+                variable
+            ] = 0
+
+    presencia[
+        "estado_p009_p010"
+    ] = np.select(
         [
-            presencia["primas_netas"].eq(1)
-            & presencia["primas_cedidas"].eq(1),
+            presencia[
+                "primas_netas"
+            ].eq(1)
+            & presencia[
+                "primas_cedidas"
+            ].eq(1),
 
-            presencia["primas_netas"].eq(1)
-            & presencia["primas_cedidas"].eq(0),
+            presencia[
+                "primas_netas"
+            ].eq(1)
+            & presencia[
+                "primas_cedidas"
+            ].eq(0),
 
-            presencia["primas_netas"].eq(0)
-            & presencia["primas_cedidas"].eq(1),
+            presencia[
+                "primas_netas"
+            ].eq(0)
+            & presencia[
+                "primas_cedidas"
+            ].eq(1),
         ],
         [
             "ambas",
@@ -876,48 +1237,55 @@ def depurar_registros_especiales(
         ]
     ].copy()
 
-    # Reemplazar el estado antiguo por el estado ya depurado.
+    # Reemplazar el estado anterior por el estado después
+    # de la depuración de registros especiales.
     sbs_filtrado = sbs_filtrado.drop(
-        columns=["estado_p009_p010"],
+        columns=[
+            "estado_p009_p010"
+        ],
         errors="ignore"
     )
 
     sbs_filtrado = sbs_filtrado.merge(
         comparacion_filtrada,
-        on=["periodo", "empresa_sbs"],
+        on=[
+            "periodo",
+            "empresa_sbs",
+        ],
         how="left",
         validate="one_to_one"
     )
 
     # -------------------------------------------------------------------------
-    # 6. Auditoría.
+    # 6. Reporte en consola/log.
+    #    NO se crea ningún CSV dentro de /salidas.
     # -------------------------------------------------------------------------
-    if guardar_auditoria:
-
-        ruta = (
-            CARPETA_SALIDAS
-            / "registros_especiales_sbs.csv"
-        )
-
-        especiales.to_csv(
-            ruta,
-            index=False,
-            encoding="utf-8"
-        )
-
     if especiales.empty:
 
         reportar(
             "\nRegistros especiales SBS: "
-            "no se detectaron columnas empresariales transitorias."
+            "no se detectaron columnas "
+            "empresariales transitorias."
         )
 
     else:
 
         empresas_especiales = (
-            especiales["empresa_sbs"]
+            especiales[
+                "empresa_sbs"
+            ]
             .drop_duplicates()
             .tolist()
+        )
+
+        observaciones_excluidas = len(
+            especiales[
+                [
+                    "periodo",
+                    "empresa_sbs",
+                ]
+            ]
+            .drop_duplicates()
         )
 
         reportar(
@@ -927,12 +1295,20 @@ def depurar_registros_especiales(
 
         reportar(
             "  Empresas/columnas afectadas: "
-            + "; ".join(empresas_especiales)
+            + "; ".join(
+                empresas_especiales
+            )
         )
 
         reportar(
-            "  Se conservan en auditoría y se excluyen "
-            "del panel empresa × mes."
+            "  Observaciones empresa-mes excluidas "
+            f"del panel: {observaciones_excluidas:,}."
+        )
+
+        reportar(
+            "  La evidencia permanece disponible "
+            "en memoria durante la ejecución; "
+            "no se genera archivo en /salidas."
         )
 
     return (
@@ -946,23 +1322,31 @@ def depurar_registros_especiales(
 # =============================================================================
 # BLOQUE 7. PRESENCIA Y TRAYECTORIA EMPRESARIAL
 # =============================================================================
+# Este bloque resume la presencia temporal de las empresas después de que
+# el Bloque 8 haya construido id_empresa.
+#
 # IMPORTANTE:
-# El id_empresa NO se asigna aquí únicamente por nombre.
-# Se asignará en el Bloque 8 utilizando:
-# - continuidad temporal;
-# - cambios de denominación respaldados por SBS;
-# - fusiones con continuidad explícitamente documentada;
-# - posibles reutilizaciones de un mismo nombre.
+# - Aquí NO se construye la identidad empresarial.
+# - Aquí NO se guardan CSV en /salidas.
+# - Los controles se mantienen en memoria y se reportan en consola/log.
 # =============================================================================
 
 
 def calcular_presencia(sbs, columna):
     """
-    Resume la presencia temporal de cada valor de 'columna'.
-    No supone que un mismo nombre equivalga necesariamente a una sola
-    identidad jurídica.
+    Resume la presencia temporal de cada valor de una columna.
+
+    Calcula:
+    - primer periodo;
+    - último periodo;
+    - meses observados;
+    - meses comprendidos entre inicio y fin;
+    - meses faltantes dentro de ese rango.
     """
-    g = sbs.groupby(columna)["periodo"]
+
+    g = sbs.groupby(
+        columna
+    )["periodo"]
 
     presencia = pd.DataFrame({
         "primer_periodo": g.min(),
@@ -970,15 +1354,29 @@ def calcular_presencia(sbs, columna):
         "meses_presente": g.nunique(),
     })
 
-    presencia["meses_en_su_rango"] = (
-        presencia["ultimo_periodo"].apply(periodo_a_numero)
-        - presencia["primer_periodo"].apply(periodo_a_numero)
+    presencia[
+        "meses_en_su_rango"
+    ] = (
+        presencia[
+            "ultimo_periodo"
+        ].apply(periodo_a_numero)
+        -
+        presencia[
+            "primer_periodo"
+        ].apply(periodo_a_numero)
         + 1
     )
 
-    presencia["meses_faltantes_en_su_rango"] = (
-        presencia["meses_en_su_rango"]
-        - presencia["meses_presente"]
+    presencia[
+        "meses_faltantes_en_su_rango"
+    ] = (
+        presencia[
+            "meses_en_su_rango"
+        ]
+        -
+        presencia[
+            "meses_presente"
+        ]
     )
 
     return presencia.reset_index()
@@ -987,66 +1385,64 @@ def calcular_presencia(sbs, columna):
 def _nombres_en_orden(grupo):
     """
     Devuelve los nombres SBS utilizados por una trayectoria,
-    respetando su orden temporal y evitando repeticiones consecutivas.
+    respetando el orden temporal y evitando repeticiones consecutivas.
     """
-    grupo = grupo.sort_values("periodo")
+
+    grupo = grupo.sort_values(
+        "periodo"
+    )
 
     nombres = []
 
-    for nombre in grupo["empresa_sbs"]:
-        if not nombres or nombres[-1] != nombre:
-            nombres.append(nombre)
+    for nombre in grupo[
+        "empresa_sbs"
+    ]:
 
-    return " -> ".join(nombres)
+        if (
+            not nombres
+            or nombres[-1] != nombre
+        ):
+            nombres.append(
+                nombre
+            )
+
+    return " -> ".join(
+        nombres
+    )
 
 
-def guardar_presencia_y_trayectoria(sbs, eventos):
+def guardar_presencia_y_trayectoria(
+    sbs,
+    eventos
+):
     """
-    Genera las tablas auxiliares de presencia y trayectoria.
+    Realiza controles de presencia y trayectoria empresarial.
 
-    Requiere que el Bloque 8 ya haya creado id_empresa.
+    El nombre de la función se conserva para mantener compatibilidad
+    con el flujo ya construido del Script 03, pero ya NO escribe
+    archivos en /salidas.
+
+    Requiere que el Bloque 8 haya creado id_empresa.
     """
 
     if "id_empresa" not in sbs.columns:
+
         raise RuntimeError(
-            "No existe id_empresa. La identidad empresarial debe "
-            "construirse primero en el Bloque 8."
+            "No existe id_empresa. "
+            "La identidad empresarial debe construirse "
+            "primero en el Bloque 8."
         )
 
     # -------------------------------------------------------------------------
-    # 1. PRESENCIA POR NOMBRE TAL COMO APARECE EN SBS
+    # 1. PRESENCIA DE LOS NOMBRES TAL COMO APARECEN EN SBS
     # -------------------------------------------------------------------------
     presencia = calcular_presencia(
         sbs,
         "empresa_sbs"
-    ).rename(
-        columns={
-            "empresa_sbs": "empresa_original"
-        }
-    )
-
-    ids_por_nombre = (
-        sbs.groupby("empresa_sbs")["id_empresa"]
-        .agg(
-            lambda x: ";".join(
-                sorted(pd.unique(x.astype(str)))
-            )
-        )
-    )
-
-    presencia["ids_asociados"] = (
-        presencia["empresa_original"]
-        .map(ids_por_nombre)
-    )
-
-    presencia.to_csv(
-        CARPETA_SALIDAS / "presencia_empresas.csv",
-        index=False,
-        encoding="utf-8"
     )
 
     # -------------------------------------------------------------------------
-    # 2. TRAYECTORIA POR IDENTIDAD EMPRESARIAL
+    # 2. TRAYECTORIAS SEGÚN id_empresa
     # -------------------------------------------------------------------------
     filas_trayectoria = []
 
@@ -1055,39 +1451,69 @@ def guardar_presencia_y_trayectoria(sbs, eventos):
         sort=True
     ):
 
-        grupo = grupo.sort_values("periodo")
+        grupo = grupo.sort_values(
+            "periodo"
+        )
 
-        primer_periodo = grupo["periodo"].min()
-        ultimo_periodo = grupo["periodo"].max()
-        meses_presente = grupo["periodo"].nunique()
+        primer_periodo = (
+            grupo["periodo"].min()
+        )
+
+        ultimo_periodo = (
+            grupo["periodo"].max()
+        )
+
+        meses_presente = (
+            grupo["periodo"].nunique()
+        )
 
         meses_en_rango = (
-            periodo_a_numero(ultimo_periodo)
-            - periodo_a_numero(primer_periodo)
+            periodo_a_numero(
+                ultimo_periodo
+            )
+            -
+            periodo_a_numero(
+                primer_periodo
+            )
             + 1
         )
 
         filas_trayectoria.append({
-            "id_empresa": id_empresa,
-            "nombre_inicial_sbs": (
-                grupo.iloc[0]["empresa_sbs"]
-            ),
-            "nombre_final_sbs": (
-                grupo.iloc[-1]["empresa_sbs"]
-            ),
-            "nombres_sbs_en_trayectoria": (
-                _nombres_en_orden(grupo)
-            ),
-            "primer_periodo": primer_periodo,
-            "ultimo_periodo": ultimo_periodo,
-            "meses_presente": meses_presente,
-            "meses_en_su_rango": meses_en_rango,
-            "meses_faltantes_en_su_rango": (
-                meses_en_rango - meses_presente
-            ),
-            "tipo_evento_identidad": "",
-            "periodo_evento": "",
-            "evidencia_sbs": "",
+            "id_empresa":
+                id_empresa,
+
+            "nombre_inicial_sbs":
+                grupo.iloc[0][
+                    "empresa_sbs"
+                ],
+
+            "nombre_final_sbs":
+                grupo.iloc[-1][
+                    "empresa_sbs"
+                ],
+
+            "nombres_sbs_en_trayectoria":
+                _nombres_en_orden(
+                    grupo
+                ),
+
+            "primer_periodo":
+                primer_periodo,
+
+            "ultimo_periodo":
+                ultimo_periodo,
+
+            "meses_presente":
+                meses_presente,
+
+            "meses_en_su_rango":
+                meses_en_rango,
+
+            "meses_faltantes_en_su_rango":
+                (
+                    meses_en_rango
+                    - meses_presente
+                ),
         })
 
     trayectoria = pd.DataFrame(
@@ -1095,151 +1521,121 @@ def guardar_presencia_y_trayectoria(sbs, eventos):
     )
 
     # -------------------------------------------------------------------------
-    # 3. Incorporar eventos que realmente afectan la continuidad de identidad
+    # 3. EMPRESAS ACTIVAS POR MES
     # -------------------------------------------------------------------------
-    if eventos is not None and not eventos.empty:
+    por_mes = (
+        sbs.groupby(
+            "periodo"
+        )["id_empresa"]
+        .nunique()
+        .rename(
+            "n_empresas"
+        )
+        .reset_index()
+    )
 
-        if "aplicado" in eventos.columns:
+    # -------------------------------------------------------------------------
+    # 4. CONTROLES
+    # -------------------------------------------------------------------------
+    if sbs[
+        [
+            "periodo",
+            "id_empresa"
+        ]
+    ].duplicated().any():
 
-            aplicados = eventos[
-                eventos["aplicado"].eq(True)
-            ]
-
-            for _, evento in aplicados.iterrows():
-
-                periodo = evento.get(
-                    "periodo_transicion",
-                    None
-                )
-
-                destino = evento.get(
-                    "continuidad_hacia",
-                    None
-                )
-
-                if (
-                    not periodo
-                    or pd.isna(periodo)
-                    or not destino
-                    or pd.isna(destino)
-                ):
-                    continue
-
-                candidatos = sbs[
-                    sbs["periodo"].eq(periodo)
-                    & sbs["empresa_sbs"].eq(destino)
+        duplicados = sbs.loc[
+            sbs[
+                [
+                    "periodo",
+                    "id_empresa"
                 ]
-
-                ids = candidatos[
-                    "id_empresa"
-                ].dropna().unique()
-
-                if len(ids) != 1:
-                    continue
-
-                id_afectado = ids[0]
-
-                mask = trayectoria[
-                    "id_empresa"
-                ].eq(id_afectado)
-
-                trayectoria.loc[
-                    mask,
-                    "tipo_evento_identidad"
-                ] = evento.get(
-                    "tipo_evento",
-                    ""
-                )
-
-                trayectoria.loc[
-                    mask,
-                    "periodo_evento"
-                ] = periodo
-
-                trayectoria.loc[
-                    mask,
-                    "evidencia_sbs"
-                ] = evento.get(
-                    "evidencia_sbs",
-                    ""
-                )
-
-    trayectoria.to_csv(
-        CARPETA_SALIDAS / "trayectoria_empresarial.csv",
-        index=False,
-        encoding="utf-8"
-    )
-
-    # -------------------------------------------------------------------------
-    # 4. EMPRESAS ACTIVAS POR MES
-    # -------------------------------------------------------------------------
-    filas_mes = []
-
-    for periodo, grupo in sbs.groupby(
-        "periodo",
-        sort=True
-    ):
-
-        grupo = grupo.sort_values(
-            ["id_empresa", "empresa_sbs"]
-        )
-
-        detalle = "; ".join(
-            f"{fila.id_empresa}: {fila.empresa_sbs}"
-            for fila in grupo.itertuples()
-        )
-
-        filas_mes.append({
-            "periodo": periodo,
-            "n_empresas": (
-                grupo["id_empresa"].nunique()
+            ].duplicated(
+                keep=False
             ),
-            "empresas": detalle,
-        })
+            [
+                "periodo",
+                "id_empresa",
+                "empresa_sbs"
+            ]
+        ]
 
-    por_mes = pd.DataFrame(filas_mes)
+        raise RuntimeError(
+            "Se detectaron dos observaciones para "
+            "la misma identidad empresarial en un mes:\n"
+            + duplicados.to_string(
+                index=False
+            )
+        )
 
-    por_mes.to_csv(
-        CARPETA_SALIDAS / "empresas_por_mes.csv",
-        index=False,
-        encoding="utf-8"
+    reportar(
+        "\nPresencia empresarial:"
     )
 
     reportar(
-        f"\nEmpresas por mes: mínimo "
+        f"  Nombres distintos observados en SBS: "
+        f"{sbs['empresa_sbs'].nunique():,}."
+    )
+
+    reportar(
+        f"  Identidades empresariales: "
+        f"{sbs['id_empresa'].nunique():,}."
+    )
+
+    reportar(
+        f"  Empresas por mes: mínimo "
         f"{por_mes['n_empresas'].min()}, "
-        f"máximo {por_mes['n_empresas'].max()}."
+        f"máximo "
+        f"{por_mes['n_empresas'].max()}."
+    )
+
+    trayectorias_con_huecos = trayectoria[
+        trayectoria[
+            "meses_faltantes_en_su_rango"
+        ] > 0
+    ]
+
+    reportar(
+        "  Trayectorias con meses faltantes "
+        f"dentro de su rango: "
+        f"{len(trayectorias_con_huecos):,}."
     )
 
     reportar(
-        "  Salidas: presencia_empresas.csv, "
-        "empresas_por_mes.csv y "
-        "trayectoria_empresarial.csv"
+        "  Las tablas auxiliares permanecen "
+        "en memoria; no se generan CSV en /salidas."
     )
+
+    return (
+        presencia,
+        trayectoria,
+        por_mes
+    )
+
 
 
 # =============================================================================
 # BLOQUE 8. IDENTIDAD EMPRESARIAL Y HOMOLOGACIÓN DESDE EVIDENCIA SBS
 # =============================================================================
-# OBJETIVO:
-# Construir un id_empresa estable utilizando evidencia de la SBS,
-# sin homologaciones manuales ni equivalencias inventadas.
+# Objetivo:
+# Detectar eventos societarios contenidos en los pies de página SBS y
+# determinar cuáles implican continuidad de una trayectoria empresarial.
 #
-# PRINCIPIOS:
-# - Un mismo nombre no implica automáticamente la misma identidad jurídica.
-# - Un cambio de denominación puede conservar la identidad.
-# - Una fusión/absorción NO une trayectorias retrospectivamente.
-# - Los registros especiales "(abs)" se usan como evidencia, no como empresas.
+# IMPORTANTE:
+# - No se inventan equivalencias empresariales.
+# - Los cambios de denominación requieren continuidad temporal.
+# - Las fusiones se analizan mediante la evidencia SBS.
+# - Los registros "(abs)" funcionan como evidencia.
+# - La construcción definitiva de id_empresa será reforzada en el Bloque 8A.
 # =============================================================================
 
 
 # =============================================================================
-# PASO 1. CLASIFICAR LOS EVENTOS SOCIETARIOS
+# 1. CLASIFICACIÓN DE EVENTOS
 # =============================================================================
+
 def clasificar_evento(nota_normalizada):
-    """
-    Clasifica una nota SBS según el evento societario descrito.
-    """
+    """Clasifica una nota SBS según el evento societario descrito."""
 
     n = nota_normalizada
 
@@ -1268,12 +1664,13 @@ def clasificar_evento(nota_normalizada):
 
 
 # =============================================================================
-# PASO 2. FUNCIONES AUXILIARES PARA FECHAS Y REFERENCIAS
+# 2. FUNCIONES AUXILIARES
 # =============================================================================
+
 def periodo_resolucion(texto):
     """
-    Extrae una fecha dd/mm/aaaa o dd-mm-aaaa de una nota SBS.
-    Devuelve YYYY-MM.
+    Extrae una fecha dd/mm/aaaa o dd-mm-aaaa de una nota SBS
+    y devuelve YYYY-MM.
     """
 
     fecha = re.search(
@@ -1291,10 +1688,7 @@ def periodo_resolucion(texto):
 
 
 def periodo_anterior(periodo):
-    """
-    Devuelve el mes inmediatamente anterior.
-    Ejemplo: 2022-06 -> 2022-05.
-    """
+    """Devuelve el mes inmediatamente anterior."""
 
     return str(
         pd.Period(
@@ -1305,9 +1699,7 @@ def periodo_anterior(periodo):
 
 
 def refs_a_set(valor):
-    """
-    Convierte una referencia como '1;2' en {'1', '2'}.
-    """
+    """Convierte '1;2' en {'1', '2'}."""
 
     if pd.isna(valor):
         return set()
@@ -1320,8 +1712,9 @@ def refs_a_set(valor):
 
 
 # =============================================================================
-# PASO 3. IDENTIFICAR EMPRESAS MENCIONADAS EN LAS NOTAS SBS
+# 3. IDENTIFICACIÓN DE EMPRESAS EN LAS NOTAS
 # =============================================================================
+
 def nombres_mencionados(texto, nombres):
     """
     Busca dentro de una nota los nombres que realmente existen
@@ -1356,12 +1749,11 @@ def resolver_nombre_capturado(
 ):
     """
     Relaciona un nombre leído dentro de una nota con un nombre
-    que realmente aparece en los encabezados SBS.
+    realmente observado en los encabezados SBS.
     """
 
     objetivo = sin_puntuacion(texto)
 
-    # 3.1. Primero se intenta coincidencia exacta.
     exactos = [
         nombre
         for nombre in nombres
@@ -1376,7 +1768,6 @@ def resolver_nombre_capturado(
     if not objetivo_tokens:
         return None
 
-    # 3.2. Como respaldo, se comparan secuencias de palabras.
     candidatos = []
 
     for nombre in nombres:
@@ -1413,8 +1804,6 @@ def resolver_nombre_capturado(
     if len(candidatos) == 1:
         return candidatos[0]
 
-    # Si los dos candidatos principales son igual de fuertes,
-    # se considera ambiguo y no se decide automáticamente.
     puntaje_1 = (
         len(tokens(candidatos[0])),
         len(sin_puntuacion(candidatos[0]))
@@ -1432,14 +1821,15 @@ def resolver_nombre_capturado(
 
 
 # =============================================================================
-# PASO 4. VINCULAR NOTAS SBS CON SUS ENCABEZADOS
+# 4. VINCULACIÓN DE NOTAS Y ENCABEZADOS
 # =============================================================================
+
 def encabezados_referenciados(
     grupo_notas,
     columnas_df
 ):
     """
-    Usa referencias (1), (2), etc. para saber qué encabezados
+    Usa referencias (1), (2), etc. para identificar qué encabezados
     están relacionados con una nota.
     """
 
@@ -1448,51 +1838,46 @@ def encabezados_referenciados(
     for _, nota in grupo_notas.iterrows():
 
         refs_nota = refs_a_set(
-            nota[
-                "referencias_detectadas"
-            ]
+            nota["referencias_detectadas"]
         )
 
         if not refs_nota:
             continue
 
         columnas = columnas_df[
-            columnas_df[
-                "periodo"
-            ].eq(nota["periodo"])
-            & columnas_df[
-                "hoja"
-            ].eq(nota["hoja"])
+            columnas_df["periodo"].eq(
+                nota["periodo"]
+            )
+            & columnas_df["hoja"].eq(
+                nota["hoja"]
+            )
         ]
 
         for _, columna in columnas.iterrows():
 
             refs_columna = refs_a_set(
-                columna[
-                    "referencia_nota"
-                ]
+                columna["referencia_nota"]
             )
 
             if refs_nota & refs_columna:
 
                 encontrados.add(
-                    columna[
-                        "nombre_limpio"
-                    ]
+                    columna["nombre_limpio"]
                 )
 
     return sorted(encontrados)
 
 
 # =============================================================================
-# PASO 5. COMPROBAR REGISTROS ESPECIALES DE EMPRESAS ABSORBIDAS
+# 5. REGISTROS ESPECIALES DE ABSORCIÓN
 # =============================================================================
+
 def nombre_base_abs(nombre):
     """
-    Elimina solo la marca '(abs)' para comparar nombres.
+    Elimina únicamente la marca '(abs)' para comparar nombres.
 
     Ejemplo:
-    'Mapfre Perú (abs)' -> 'MAPFRE PERU'
+    Mapfre Perú (abs) -> MAPFRE PERU
     """
 
     limpio = re.sub(
@@ -1511,8 +1896,8 @@ def hay_absorbida_mismo_nombre(
     periodo_transicion
 ):
     """
-    Comprueba si existe un registro especial '(abs)'
-    relacionado con la empresa vigente en el mes de la fusión.
+    Comprueba si existe un registro especial '(abs)' asociado a la
+    empresa vigente durante el mes de una fusión.
     """
 
     if (
@@ -1522,12 +1907,10 @@ def hay_absorbida_mismo_nombre(
         return False
 
     candidatos = especiales[
-        especiales[
-            "periodo"
-        ].eq(periodo_transicion)
-        & especiales[
-            "tipo_definitivo"
-        ].eq(
+        especiales["periodo"].eq(
+            periodo_transicion
+        )
+        & especiales["tipo_definitivo"].eq(
             "registro_especial_absorcion"
         )
     ]
@@ -1550,8 +1933,9 @@ def hay_absorbida_mismo_nombre(
 
 
 # =============================================================================
-# PASO 6. EVALUAR LOS EVENTOS SOCIETARIOS
+# 6. EVALUACIÓN DE EVENTOS SOCIETARIOS
 # =============================================================================
+
 def evaluar_eventos(
     sbs,
     notas,
@@ -1559,8 +1943,8 @@ def evaluar_eventos(
     especiales=None
 ):
     """
-    Decide qué eventos solamente se documentan y cuáles realmente
-    modifican la continuidad de una identidad empresarial.
+    Decide qué eventos solo se documentan y cuáles pueden modificar
+    la continuidad de una identidad empresarial.
     """
 
     columnas_eventos = [
@@ -1615,7 +1999,9 @@ def evaluar_eventos(
             "nota_original"
         ].iloc[0]
 
-        nota_norm = normalizar(texto)
+        nota_norm = normalizar(
+            texto
+        )
 
         tipo = clasificar_evento(
             nota_norm
@@ -1638,11 +2024,9 @@ def evaluar_eventos(
             for ref in refs_a_set(valor)
         })
 
-        refs_enc = (
-            encabezados_referenciados(
-                grupo,
-                columnas_df
-            )
+        refs_enc = encabezados_referenciados(
+            grupo,
+            columnas_df
         )
 
         registro = {
@@ -1655,17 +2039,15 @@ def evaluar_eventos(
                 periodo_resolucion(texto),
             "periodo_transicion": None,
 
-            "primer_periodo_nota": (
+            "primer_periodo_nota":
                 min(periodos_nota)
                 if periodos_nota
-                else None
-            ),
+                else None,
 
-            "ultimo_periodo_nota": (
+            "ultimo_periodo_nota":
                 max(periodos_nota)
                 if periodos_nota
-                else None
-            ),
+                else None,
 
             "apariciones_nota":
                 len(grupo),
@@ -1712,16 +2094,14 @@ def evaluar_eventos(
                 ),
         }
 
-        # =====================================================================
-        # PASO 6A. CAMBIO DE DENOMINACIÓN
-        # =====================================================================
+        # ---------------------------------------------------------------------
+        # CAMBIO DE DENOMINACIÓN
+        # ---------------------------------------------------------------------
         if tipo == "cambio_de_denominacion":
 
-            mencionados = (
-                nombres_mencionados(
-                    texto,
-                    nombres
-                )
+            mencionados = nombres_mencionados(
+                texto,
+                nombres
             )
 
             pares = []
@@ -1733,32 +2113,26 @@ def evaluar_eventos(
                     if anterior == nuevo:
                         continue
 
-                    fin_anterior = (
-                        presencia.loc[
-                            anterior,
-                            "ultimo_periodo"
-                        ]
-                    )
+                    fin_anterior = presencia.loc[
+                        anterior,
+                        "ultimo_periodo"
+                    ]
 
-                    inicio_nuevo = (
-                        presencia.loc[
-                            nuevo,
-                            "primer_periodo"
-                        ]
-                    )
+                    inicio_nuevo = presencia.loc[
+                        nuevo,
+                        "primer_periodo"
+                    ]
 
-                    # Solo se acepta continuidad exacta:
-                    # antiguo termina en t y nuevo empieza en t+1.
                     if (
                         periodo_a_numero(
                             inicio_nuevo
                         )
-                        - periodo_a_numero(
+                        -
+                        periodo_a_numero(
                             fin_anterior
                         )
                         == 1
                     ):
-
                         pares.append(
                             (
                                 anterior,
@@ -1804,80 +2178,74 @@ def evaluar_eventos(
                 registro[
                     "motivo"
                 ] = (
-                    "Cambio de denominación "
-                    "documentado por SBS y "
-                    "continuidad temporal exacta."
+                    "Cambio de denominación documentado "
+                    "por SBS y continuidad temporal exacta."
                 )
 
             elif len(pares) == 0:
 
-                registro["motivo"] = (
-                    "La nota indica cambio de "
-                    "denominación, pero no existe "
-                    "una pareja única de nombres "
+                registro[
+                    "motivo"
+                ] = (
+                    "La nota indica cambio de denominación, "
+                    "pero no existe una pareja única de nombres "
                     "con continuidad temporal exacta."
                 )
 
             else:
 
-                registro["motivo"] = (
+                registro[
+                    "motivo"
+                ] = (
                     "Cambio de denominación ambiguo: "
                     "más de una pareja temporal posible."
                 )
 
-            eventos.append(registro)
+            eventos.append(
+                registro
+            )
 
             continue
 
-        # =====================================================================
-        # PASO 6B. FUSIÓN O ABSORCIÓN
-        # =====================================================================
+        # ---------------------------------------------------------------------
+        # FUSIÓN / ABSORCIÓN
+        # ---------------------------------------------------------------------
         if tipo == "fusion_absorcion":
 
-            texto_limpio = (
-                sin_puntuacion(texto)
+            texto_limpio = sin_puntuacion(
+                texto
             )
 
-            # Se exige una formulación fuerte y explícita de la SBS.
-            #
-            # Ejemplo real:
-            # "Las cifras de X consideran los flujos de Y
-            # para el periodo previo a la fusión."
             patron = re.search(
                 r"LAS CIFRAS DE (.+?) "
-                r"CONSIDERAN LOS FLUJOS DE "
-                r"(.+?) "
-                r"PARA EL PERIODO PREVIO "
-                r"A LA FUSION",
+                r"CONSIDERAN LOS FLUJOS DE (.+?) "
+                r"PARA EL PERIODO PREVIO A LA FUSION",
                 texto_limpio
             )
 
-            # Si no existe esta formulación fuerte,
-            # la fusión se documenta pero no se aplica.
             if not patron:
 
-                registro["motivo"] = (
-                    "Fusión/absorción documentada "
-                    "por SBS; se registra, pero "
-                    "no se fuerza continuidad."
+                registro[
+                    "motivo"
+                ] = (
+                    "Fusión/absorción documentada por SBS; "
+                    "se registra, pero no se fuerza continuidad."
                 )
 
-                eventos.append(registro)
+                eventos.append(
+                    registro
+                )
 
                 continue
 
-            actual = (
-                resolver_nombre_capturado(
-                    patron.group(1),
-                    nombres
-                )
+            actual = resolver_nombre_capturado(
+                patron.group(1),
+                nombres
             )
 
-            previo = (
-                resolver_nombre_capturado(
-                    patron.group(2),
-                    nombres
-                )
+            previo = resolver_nombre_capturado(
+                patron.group(2),
+                nombres
             )
 
             transicion = (
@@ -1892,13 +2260,16 @@ def evaluar_eventos(
                 or not transicion
             ):
 
-                registro["motivo"] = (
-                    "No fue posible resolver "
-                    "de forma única las empresas "
-                    "mencionadas en la nota de fusión."
+                registro[
+                    "motivo"
+                ] = (
+                    "No fue posible resolver de forma única "
+                    "las empresas mencionadas en la nota de fusión."
                 )
 
-                eventos.append(registro)
+                eventos.append(
+                    registro
+                )
 
                 continue
 
@@ -1906,38 +2277,33 @@ def evaluar_eventos(
                 transicion
             )
 
-            # Empresa que continúa debe existir en el mes de transición.
             existe_actual = (
                 sbs["periodo"].eq(
                     transicion
                 )
-                & sbs["empresa_sbs"].eq(
-                    actual
-                )
+                & sbs[
+                    "empresa_sbs"
+                ].eq(actual)
             ).any()
 
-            # Empresa previa debe existir en el mes inmediatamente anterior.
             existe_previo = (
                 sbs["periodo"].eq(
                     mes_previo
                 )
-                & sbs["empresa_sbs"].eq(
-                    previo
-                )
+                & sbs[
+                    "empresa_sbs"
+                ].eq(previo)
             ).any()
 
-            # Se comprueba si el mismo nombre de la empresa actual
-            # ya existía antes de la fusión.
             existe_actual_mes_previo = (
                 sbs["periodo"].eq(
                     mes_previo
                 )
-                & sbs["empresa_sbs"].eq(
-                    actual
-                )
+                & sbs[
+                    "empresa_sbs"
+                ].eq(actual)
             ).any()
 
-            # También debe existir la evidencia especial "(abs)".
             evidencia_abs = (
                 hay_absorbida_mismo_nombre(
                     especiales,
@@ -1976,8 +2342,6 @@ def evaluar_eventos(
                     "aplicado"
                 ] = True
 
-                # Solo se rompe la trayectoria del mismo nombre
-                # si ese nombre ya existía antes de la fusión.
                 registro[
                     "rompe_mismo_nombre"
                 ] = bool(
@@ -1987,10 +2351,9 @@ def evaluar_eventos(
                 registro[
                     "motivo"
                 ] = (
-                    "Fusión con continuidad explícita "
-                    "respaldada por SBS: la empresa "
-                    "vigente incorpora los flujos de "
-                    "la entidad previa y existe registro "
+                    "Fusión con continuidad explícita respaldada "
+                    "por SBS: la empresa vigente incorpora los "
+                    "flujos de la entidad previa y existe registro "
                     "especial '(abs)' de la absorbida."
                 )
 
@@ -1999,29 +2362,30 @@ def evaluar_eventos(
                 registro[
                     "motivo"
                 ] = (
-                    "La nota sugiere continuidad "
-                    "por fusión, pero faltan "
-                    "condiciones de verificación "
-                    "temporal o evidencia '(abs)'. "
-                    "No se aplica."
+                    "La nota sugiere continuidad por fusión, "
+                    "pero faltan condiciones de verificación "
+                    "temporal o evidencia '(abs)'. No se aplica."
                 )
 
-            eventos.append(registro)
+            eventos.append(
+                registro
+            )
 
             continue
 
-        # =====================================================================
-        # PASO 6C. OTROS EVENTOS
-        # =====================================================================
+        # ---------------------------------------------------------------------
+        # OTROS EVENTOS
+        # ---------------------------------------------------------------------
         registro[
             "motivo"
         ] = (
-            "Evento societario documentado "
-            "por SBS; no modifica "
-            "automáticamente la identidad."
+            "Evento societario documentado por SBS; "
+            "no modifica automáticamente la identidad."
         )
 
-        eventos.append(registro)
+        eventos.append(
+            registro
+        )
 
     return pd.DataFrame(
         eventos,
@@ -2030,15 +2394,16 @@ def evaluar_eventos(
 
 
 # =============================================================================
-# PASO 7. CONSTRUIR EL id_empresa
+# 7. CONSTRUCCIÓN INICIAL DEL id_empresa
 # =============================================================================
+# Esta versión será reemplazada/reforzada por el Bloque 8A.
+# =============================================================================
+
 def construir_id_empresa(
     sbs,
     eventos
 ):
-    """
-    Construye una identidad estable para cada trayectoria empresarial.
-    """
+    """Construye una identidad estable para cada trayectoria empresarial."""
 
     p = (
         sbs.copy()
@@ -2058,19 +2423,13 @@ def construir_id_empresa(
         )
     )
 
-    if (
-        len(claves)
-        != len(set(claves))
-    ):
+    if len(claves) != len(set(claves)):
 
         raise RuntimeError(
             "Hay duplicados periodo × empresa_sbs "
             "antes de construir id_empresa."
         )
 
-    # -------------------------------------------------------------------------
-    # PASO 7A. Preparar estructura de componentes
-    # -------------------------------------------------------------------------
     padre = {
         clave: clave
         for clave in claves
@@ -2094,13 +2453,10 @@ def construir_id_empresa(
         raiz_b = buscar(b)
 
         if raiz_a != raiz_b:
-
-            padre[
-                raiz_b
-            ] = raiz_a
+            padre[raiz_b] = raiz_a
 
     # -------------------------------------------------------------------------
-    # PASO 7B. Identificar rupturas documentadas del mismo nombre
+    # Rupturas documentadas del mismo nombre
     # -------------------------------------------------------------------------
     rupturas = set()
 
@@ -2135,13 +2491,7 @@ def construir_id_empresa(
                 )
 
     # -------------------------------------------------------------------------
-    # PASO 7C. Mantener continuidad del mismo nombre
-    # -------------------------------------------------------------------------
-    # Si una empresa tiene exactamente el mismo nombre y existe un hueco
-    # de uno o más meses, el hueco se audita por separado.
-    #
-    # NO se crea automáticamente una empresa nueva por ese hueco,
-    # salvo que exista evidencia SBS de ruptura de identidad.
+    # Continuidad del mismo nombre
     # -------------------------------------------------------------------------
     for nombre, grupo in p.groupby(
         "empresa_sbs",
@@ -2150,7 +2500,9 @@ def construir_id_empresa(
 
         periodos = (
             grupo
-            .sort_values("periodo")[
+            .sort_values(
+                "periodo"
+            )[
                 "periodo"
             ]
             .tolist()
@@ -2161,8 +2513,6 @@ def construir_id_empresa(
             periodos[1:]
         ):
 
-            # Si SBS documentó una ruptura societaria,
-            # NO se unen ambos lados.
             if (
                 nombre,
                 actual
@@ -2182,7 +2532,7 @@ def construir_id_empresa(
             )
 
     # -------------------------------------------------------------------------
-    # PASO 7D. Unir nombres diferentes cuando SBS documenta continuidad
+    # Continuidades diferentes respaldadas por SBS
     # -------------------------------------------------------------------------
     if (
         eventos is not None
@@ -2214,13 +2564,10 @@ def construir_id_empresa(
                 or pd.isna(destino)
                 or pd.isna(transicion)
             ):
-
                 continue
 
-            mes_previo = (
-                periodo_anterior(
-                    transicion
-                )
+            mes_previo = periodo_anterior(
+                transicion
             )
 
             clave_origen = (
@@ -2233,25 +2580,17 @@ def construir_id_empresa(
                 destino
             )
 
-            if (
-                clave_origen
-                not in padre
-            ):
+            if clave_origen not in padre:
 
                 raise RuntimeError(
-                    "La continuidad documentada "
-                    "no encuentra "
+                    "La continuidad documentada no encuentra "
                     f"{origen} en {mes_previo}."
                 )
 
-            if (
-                clave_destino
-                not in padre
-            ):
+            if clave_destino not in padre:
 
                 raise RuntimeError(
-                    "La continuidad documentada "
-                    "no encuentra "
+                    "La continuidad documentada no encuentra "
                     f"{destino} en {transicion}."
                 )
 
@@ -2261,22 +2600,23 @@ def construir_id_empresa(
             )
 
     # -------------------------------------------------------------------------
-    # PASO 7E. Construir los componentes de identidad
+    # Componentes
     # -------------------------------------------------------------------------
     componentes = {}
 
     for clave in claves:
 
-        raiz = buscar(clave)
+        raiz = buscar(
+            clave
+        )
 
         componentes.setdefault(
             raiz,
             []
-        ).append(clave)
+        ).append(
+            clave
+        )
 
-    # -------------------------------------------------------------------------
-    # PASO 7F. Ordenar los IDs de forma reproducible
-    # -------------------------------------------------------------------------
     def criterio_raiz(raiz):
 
         nodos = sorted(
@@ -2316,9 +2656,7 @@ def construir_id_empresa(
         )
     }
 
-    p[
-        "id_empresa"
-    ] = [
+    p["id_empresa"] = [
         id_por_raiz[
             buscar(
                 (
@@ -2330,21 +2668,9 @@ def construir_id_empresa(
         for fila in p.itertuples()
     ]
 
-    # -------------------------------------------------------------------------
-    # PASO 7G. Mantener el nombre histórico observado en cada mes
-    # -------------------------------------------------------------------------
-    # MUY IMPORTANTE:
-    # No reemplazamos retrospectivamente todos los nombres por el nombre final.
-    #
-    # Ejemplo:
-    # antes de una fusión puede decir MAPFRE PERÚ VIDA,
-    # y después MAPFRE PERÚ.
-    #
-    # El vínculo histórico lo da id_empresa.
-    # -------------------------------------------------------------------------
-    p[
-        "empresa"
-    ] = p[
+    # Nombre observado del mes.
+    # El Bloque 8A lo convertirá en nombre analítico estable.
+    p["empresa"] = p[
         "empresa_sbs"
     ]
 
@@ -2352,28 +2678,23 @@ def construir_id_empresa(
 
 
 # =============================================================================
-# PASO 8. CONTROLAR LA CONSISTENCIA DE LOS id_empresa
+# 8. CONTROLES DE IDENTIDAD
 # =============================================================================
+
 def controlar_identidades(
     sbs,
     eventos
 ):
-    """
-    Comprueba que los IDs empresariales sean coherentes.
-    """
+    """Comprueba que los IDs empresariales sean coherentes."""
 
-    # 8.1. Ninguna fila puede quedarse sin ID.
-    if (
-        sbs[
-            "id_empresa"
-        ].isna().any()
-    ):
+    if sbs[
+        "id_empresa"
+    ].isna().any():
 
         raise RuntimeError(
             "Hay filas sin id_empresa."
         )
 
-    # 8.2. Una identidad no puede aparecer dos veces en el mismo mes.
     duplicados = sbs.duplicated(
         [
             "periodo",
@@ -2405,7 +2726,6 @@ def controlar_identidades(
         eventos is None
         or eventos.empty
     ):
-
         return
 
     aplicados = eventos[
@@ -2414,7 +2734,6 @@ def controlar_identidades(
         ].eq(True)
     ]
 
-    # 8.3. Toda continuidad aplicada debe conservar el mismo ID.
     for _, evento in aplicados.iterrows():
 
         transicion = evento[
@@ -2429,19 +2748,17 @@ def controlar_identidades(
             "continuidad_hacia"
         ]
 
-        mes_previo = (
-            periodo_anterior(
-                transicion
-            )
+        mes_previo = periodo_anterior(
+            transicion
         )
 
         id_origen = sbs.loc[
             sbs["periodo"].eq(
                 mes_previo
             )
-            & sbs["empresa_sbs"].eq(
-                origen
-            ),
+            & sbs[
+                "empresa_sbs"
+            ].eq(origen),
             "id_empresa"
         ].unique()
 
@@ -2449,17 +2766,16 @@ def controlar_identidades(
             sbs["periodo"].eq(
                 transicion
             )
-            & sbs["empresa_sbs"].eq(
-                destino
-            ),
+            & sbs[
+                "empresa_sbs"
+            ].eq(destino),
             "id_empresa"
         ].unique()
 
         if (
             len(id_origen) != 1
             or len(id_destino) != 1
-            or id_origen[0]
-            != id_destino[0]
+            or id_origen[0] != id_destino[0]
         ):
 
             raise RuntimeError(
@@ -2467,8 +2783,10 @@ def controlar_identidades(
                 "no conserva el mismo id_empresa."
             )
 
-        # 8.4. Si la fusión exige romper el mismo nombre,
-        # la empresa anterior con ese nombre debe tener otro ID.
+        # ---------------------------------------------------------------------
+        # Una fusión puede obligar a separar la trayectoria anterior
+        # de una empresa con el mismo nombre.
+        # ---------------------------------------------------------------------
         if bool(
             evento[
                 "rompe_mismo_nombre"
@@ -2498,20 +2816,20 @@ def controlar_identidades(
 
                 raise RuntimeError(
                     "Una fusión que debía romper "
-                    "la trayectoria previa del mismo "
-                    "nombre terminó usando el mismo ID."
+                    "la trayectoria previa del mismo nombre "
+                    "terminó usando el mismo ID."
                 )
 
 
 # =============================================================================
-# PASO 9. GUARDAR LA AUDITORÍA DE EVENTOS
+# 9. AUDITORÍA DE EVENTOS
 # =============================================================================
-def guardar_eventos_identidad(
-    eventos
-):
-    """
-    Guarda los eventos societarios detectados y la evidencia SBS.
-    """
+# Esta función será reemplazada por el Bloque 8A para que no genere
+# archivos auxiliares dentro de /salidas.
+# =============================================================================
+
+def guardar_eventos_identidad(eventos):
+    """Guarda temporalmente la auditoría de eventos societarios."""
 
     eventos.to_csv(
         CARPETA_SALIDAS
@@ -2522,8 +2840,9 @@ def guardar_eventos_identidad(
 
 
 # =============================================================================
-# PASO 10. FUNCIÓN PRINCIPAL DE HOMOLOGACIÓN
+# 10. FUNCIÓN PRINCIPAL
 # =============================================================================
+
 def homologar(
     sbs,
     notas,
@@ -2531,11 +2850,8 @@ def homologar(
     especiales=None,
     guardar_auditoria=True
 ):
-    """
-    Ejecuta todo el proceso de identidad empresarial.
-    """
+    """Ejecuta el proceso inicial de identidad empresarial."""
 
-    # 10.1. Detectar eventos.
     eventos = evaluar_eventos(
         sbs,
         notas,
@@ -2543,26 +2859,22 @@ def homologar(
         especiales=especiales
     )
 
-    # 10.2. Construir los id_empresa.
     sbs = construir_id_empresa(
         sbs,
         eventos
     )
 
-    # 10.3. Ejecutar controles.
     controlar_identidades(
         sbs,
         eventos
     )
 
-    # 10.4. Guardar auditoría únicamente en ejecución definitiva.
     if guardar_auditoria:
 
         guardar_eventos_identidad(
             eventos
         )
 
-    # 10.5. Reportar resultados.
     aplicados = (
         eventos[
             eventos[
@@ -2604,8 +2916,7 @@ def homologar(
         for _, evento in aplicados.iterrows():
 
             reportar(
-                "  "
-                f"{evento['continuidad_desde']} "
+                f"  {evento['continuidad_desde']} "
                 "-> "
                 f"{evento['continuidad_hacia']} "
                 "| transición "
@@ -2627,38 +2938,801 @@ def homologar(
     )
 
 
+
 # =============================================================================
-# RECORDATORIO PARA LA BASE FINAL
+# BLOQUE 8A. IDENTIDAD EMPRESARIAL DEFINITIVA
 # =============================================================================
-# id_empresa:
-#   identifica la trayectoria de una empresa y puede repetirse durante meses.
+# Complementa al Bloque 8.
 #
-# id_observacion:
-#   NO se crea en este bloque.
-#   Se agregará más adelante cuando ordenemos la base final:
+# Objetivos:
+# - mantener una identidad estable a través del tiempo;
+# - reconocer variantes puramente ortográficas del mismo nombre;
+# - respetar rupturas documentadas por fusiones/absorciones;
+# - aplicar continuidades societarias respaldadas por SBS;
+# - crear un nombre analítico estable para cada trayectoria.
 #
-#       1, 2, 3, ..., N
+# empresa_sbs:
+#     nombre observado originalmente en la fuente SBS.
 #
-#   con un valor único para cada observación empresa × mes.
+# empresa:
+#     nombre analítico estable que se utilizará posteriormente.
+#
+# Este bloque NO genera archivos en /salidas.
 # =============================================================================
+
+
+def construir_id_empresa(
+    sbs,
+    eventos
+):
+    """
+    Construye un id_empresa estable para cada trayectoria empresarial.
+
+    Se consideran conjuntamente:
+    1. continuidad temporal;
+    2. equivalencia ortográfica del nombre;
+    3. eventos societarios validados por SBS;
+    4. rupturas documentadas de identidad.
+    """
+
+    p = (
+        sbs.copy()
+        .sort_values(
+            [
+                "periodo",
+                "empresa_sbs"
+            ]
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+    # =========================================================================
+    # 1. CONTROL INICIAL
+    # =========================================================================
+
+    claves = list(
+        zip(
+            p["periodo"],
+            p["empresa_sbs"]
+        )
+    )
+
+    if len(claves) != len(set(claves)):
+
+        duplicados = p.loc[
+            p.duplicated(
+                [
+                    "periodo",
+                    "empresa_sbs"
+                ],
+                keep=False
+            ),
+            [
+                "periodo",
+                "empresa_sbs"
+            ]
+        ]
+
+        raise RuntimeError(
+            "Hay duplicados periodo × empresa_sbs "
+            "antes de construir id_empresa:\n"
+            + duplicados.to_string(
+                index=False
+            )
+        )
+
+    # =========================================================================
+    # 2. CLAVE ORTOGRÁFICA
+    # =========================================================================
+    # Permite reconocer diferencias que no representan una empresa distinta.
+    #
+    # Ejemplo:
+    #
+    # Qualitas
+    # Quálitas
+    #
+    # ambas producen la misma clave normalizada.
+    # =========================================================================
+
+    p["_clave_ortografica"] = (
+        p["empresa_sbs"]
+        .apply(
+            sin_puntuacion
+        )
+    )
+
+    # -------------------------------------------------------------------------
+    # Control:
+    # dos variantes de una misma clave no pueden coexistir simultáneamente.
+    # -------------------------------------------------------------------------
+
+    colisiones = (
+        p.groupby(
+            [
+                "periodo",
+                "_clave_ortografica"
+            ]
+        )[
+            "empresa_sbs"
+        ]
+        .nunique()
+        .reset_index(
+            name="n_nombres"
+        )
+    )
+
+    colisiones = colisiones[
+        colisiones[
+            "n_nombres"
+        ] > 1
+    ]
+
+    if not colisiones.empty:
+
+        detalle = p.merge(
+            colisiones[
+                [
+                    "periodo",
+                    "_clave_ortografica"
+                ]
+            ],
+            on=[
+                "periodo",
+                "_clave_ortografica"
+            ],
+            how="inner"
+        )[
+            [
+                "periodo",
+                "empresa_sbs",
+                "_clave_ortografica"
+            ]
+        ]
+
+        raise RuntimeError(
+            "Se encontraron variantes ortográficas "
+            "simultáneas de una misma empresa:\n"
+            + detalle.to_string(
+                index=False
+            )
+        )
+
+    # =========================================================================
+    # 3. ESTRUCTURA UNION-FIND
+    # =========================================================================
+
+    padre = {
+        clave: clave
+        for clave in claves
+    }
+
+    def buscar(x):
+
+        while padre[x] != x:
+
+            padre[x] = padre[
+                padre[x]
+            ]
+
+            x = padre[x]
+
+        return x
+
+    def unir(a, b):
+
+        raiz_a = buscar(a)
+        raiz_b = buscar(b)
+
+        if raiz_a != raiz_b:
+
+            padre[
+                raiz_b
+            ] = raiz_a
+
+    # =========================================================================
+    # 4. RUPTURAS DOCUMENTADAS
+    # =========================================================================
+    # Caso fundamental:
+    #
+    # MAPFRE Perú antes de la fusión
+    #
+    # no debe confundirse con:
+    #
+    # MAPFRE Perú después de la fusión,
+    #
+    # cuando la propia evidencia SBS establece que la continuidad posterior
+    # proviene de MAPFRE Perú Vida.
+    # =========================================================================
+
+    rupturas = set()
+
+    if (
+        eventos is not None
+        and not eventos.empty
+        and "aplicado" in eventos.columns
+    ):
+
+        aplicados = eventos[
+            eventos[
+                "aplicado"
+            ].eq(True)
+        ]
+
+        for _, evento in aplicados.iterrows():
+
+            rompe = evento.get(
+                "rompe_mismo_nombre",
+                False
+            )
+
+            if pd.isna(rompe):
+                rompe = False
+
+            if not bool(rompe):
+                continue
+
+            destino = evento.get(
+                "continuidad_hacia"
+            )
+
+            transicion = evento.get(
+                "periodo_transicion"
+            )
+
+            if (
+                pd.isna(destino)
+                or pd.isna(transicion)
+            ):
+                continue
+
+            rupturas.add(
+                (
+                    sin_puntuacion(
+                        destino
+                    ),
+                    str(
+                        transicion
+                    )
+                )
+            )
+
+    # =========================================================================
+    # 5. CONTINUIDAD POR MISMA CLAVE ORTOGRÁFICA
+    # =========================================================================
+
+    for clave_ortografica, grupo in p.groupby(
+        "_clave_ortografica",
+        sort=True
+    ):
+
+        grupo = grupo.sort_values(
+            "periodo"
+        )
+
+        filas = list(
+            grupo[
+                [
+                    "periodo",
+                    "empresa_sbs"
+                ]
+            ].itertuples(
+                index=False,
+                name=None
+            )
+        )
+
+        for anterior, actual in zip(
+            filas[:-1],
+            filas[1:]
+        ):
+
+            periodo_actual = (
+                actual[0]
+            )
+
+            # Si SBS documentó una ruptura,
+            # las dos trayectorias no se unen.
+            if (
+                clave_ortografica,
+                periodo_actual
+            ) in rupturas:
+
+                continue
+
+            unir(
+                anterior,
+                actual
+            )
+
+    # =========================================================================
+    # 6. CONTINUIDADES SOCIETARIAS VALIDADAS
+    # =========================================================================
+
+    if (
+        eventos is not None
+        and not eventos.empty
+        and "aplicado" in eventos.columns
+    ):
+
+        aplicados = eventos[
+            eventos[
+                "aplicado"
+            ].eq(True)
+        ]
+
+        for _, evento in aplicados.iterrows():
+
+            origen = evento.get(
+                "continuidad_desde"
+            )
+
+            destino = evento.get(
+                "continuidad_hacia"
+            )
+
+            transicion = evento.get(
+                "periodo_transicion"
+            )
+
+            if (
+                pd.isna(origen)
+                or pd.isna(destino)
+                or pd.isna(transicion)
+            ):
+                continue
+
+            transicion = str(
+                transicion
+            )
+
+            mes_previo = periodo_anterior(
+                transicion
+            )
+
+            clave_origen = (
+                mes_previo,
+                origen
+            )
+
+            clave_destino = (
+                transicion,
+                destino
+            )
+
+            if clave_origen not in padre:
+
+                raise RuntimeError(
+                    "La continuidad societaria validada "
+                    f"no encuentra {origen} "
+                    f"en {mes_previo}."
+                )
+
+            if clave_destino not in padre:
+
+                raise RuntimeError(
+                    "La continuidad societaria validada "
+                    f"no encuentra {destino} "
+                    f"en {transicion}."
+                )
+
+            unir(
+                clave_origen,
+                clave_destino
+            )
+
+    # =========================================================================
+    # 7. FORMAR COMPONENTES DE IDENTIDAD
+    # =========================================================================
+
+    componentes = {}
+
+    for clave in claves:
+
+        raiz = buscar(
+            clave
+        )
+
+        componentes.setdefault(
+            raiz,
+            []
+        ).append(
+            clave
+        )
+
+    # =========================================================================
+    # 8. IDs REPRODUCIBLES
+    # =========================================================================
+
+    def criterio_raiz(raiz):
+
+        nodos = sorted(
+            componentes[
+                raiz
+            ],
+            key=lambda x: (
+                periodo_a_numero(
+                    x[0]
+                ),
+                sin_puntuacion(
+                    x[1]
+                )
+            )
+        )
+
+        return (
+            periodo_a_numero(
+                nodos[0][0]
+            ),
+            sin_puntuacion(
+                nodos[0][1]
+            ),
+            sin_puntuacion(
+                nodos[-1][1]
+            )
+        )
+
+    raices = sorted(
+        componentes,
+        key=criterio_raiz
+    )
+
+    id_por_raiz = {
+        raiz: f"E{i:03d}"
+        for i, raiz in enumerate(
+            raices,
+            1
+        )
+    }
+
+    p["id_empresa"] = [
+        id_por_raiz[
+            buscar(
+                (
+                    fila.periodo,
+                    fila.empresa_sbs
+                )
+            )
+        ]
+        for fila in p.itertuples()
+    ]
+
+    # =========================================================================
+    # 9. NOMBRE ANALÍTICO ESTABLE
+    # =========================================================================
+    # Por defecto se utiliza la última denominación observada de cada
+    # trayectoria.
+    #
+    # Ejemplos:
+    #
+    # Vida Cámara -> Vivir Seguros
+    # Secrex -> Cesce Perú
+    # Ohio National Vida -> AuguStar
+    # Qualitas -> Quálitas
+    # =========================================================================
+
+    nombre_estable = {}
+
+    for id_empresa, grupo in p.groupby(
+        "id_empresa",
+        sort=False
+    ):
+
+        grupo = grupo.sort_values(
+            "periodo"
+        )
+
+        nombre_estable[
+            id_empresa
+        ] = grupo.iloc[-1][
+            "empresa_sbs"
+        ]
+
+    p["empresa"] = (
+        p["id_empresa"]
+        .map(
+            nombre_estable
+        )
+    )
+
+    # =========================================================================
+    # 9B. ETIQUETAR CAMBIOS DE DENOMINACIÓN
+    # =========================================================================
+    # Si SBS confirma que la misma entidad cambió de denominación,
+    # conserva el mismo id_empresa y utiliza como etiqueta:
+    #
+    # Nombre actual (anteriormente Nombre anterior)
+    # =========================================================================
+
+    if (
+        eventos is not None
+        and not eventos.empty
+        and "aplicado" in eventos.columns
+    ):
+
+        cambios_nombre = eventos[
+            eventos["aplicado"].eq(True)
+            &
+            eventos["tipo_evento"].eq(
+                "cambio_de_denominacion"
+            )
+        ]
+
+        for _, evento in cambios_nombre.iterrows():
+
+            origen = evento.get(
+                "continuidad_desde"
+            )
+
+            destino = evento.get(
+                "continuidad_hacia"
+            )
+
+            transicion = evento.get(
+                "periodo_transicion"
+            )
+
+            if (
+                pd.isna(origen)
+                or pd.isna(destino)
+                or pd.isna(transicion)
+            ):
+                continue
+
+            ids = p.loc[
+                p["periodo"].eq(
+                    str(transicion)
+                )
+                &
+                p["empresa_sbs"].eq(
+                    destino
+                ),
+                "id_empresa"
+            ].unique()
+
+            if len(ids) == 1:
+
+                p.loc[
+                    p["id_empresa"].eq(
+                        ids[0]
+                    ),
+                    "empresa"
+                ] = (
+                    f"{destino} "
+                    f"(anteriormente {origen})"
+                )
+    # =========================================================================
+    # 10. ETIQUETAS ESPECIALES DE FUSIÓN
+    # =========================================================================
+    # Cuando existe ruptura del mismo nombre:
+    #
+    # trayectoria antigua:
+    #     Mapfre Perú (pre-fusión)
+    #
+    # trayectoria que continúa:
+    #     Mapfre Perú (antes Mapfre Perú Vida)
+    # =========================================================================
+
+    if (
+        eventos is not None
+        and not eventos.empty
+        and "aplicado" in eventos.columns
+    ):
+
+        aplicados = eventos[
+            eventos[
+                "aplicado"
+            ].eq(True)
+        ]
+
+        for _, evento in aplicados.iterrows():
+
+            rompe = evento.get(
+                "rompe_mismo_nombre",
+                False
+            )
+
+            if pd.isna(rompe):
+                rompe = False
+
+            if not bool(rompe):
+                continue
+
+            origen = evento.get(
+                "continuidad_desde"
+            )
+
+            destino = evento.get(
+                "continuidad_hacia"
+            )
+
+            transicion = evento.get(
+                "periodo_transicion"
+            )
+
+            if (
+                pd.isna(origen)
+                or pd.isna(destino)
+                or pd.isna(transicion)
+            ):
+                continue
+
+            transicion = str(
+                transicion
+            )
+
+            mes_previo = periodo_anterior(
+                transicion
+            )
+
+            # -----------------------------------------------------------------
+            # Identidad que continúa después de la fusión.
+            # -----------------------------------------------------------------
+
+            id_continua = p.loc[
+                p["periodo"].eq(
+                    transicion
+                )
+                & p[
+                    "empresa_sbs"
+                ].eq(
+                    destino
+                ),
+                "id_empresa"
+            ].unique()
+
+            if len(id_continua) == 1:
+
+                p.loc[
+                    p[
+                        "id_empresa"
+                    ].eq(
+                        id_continua[0]
+                    ),
+                    "empresa"
+                ] = (
+                    f"{destino} "
+                    f"(antes {origen})"
+                )
+
+            # -----------------------------------------------------------------
+            # Trayectoria previa que ya tenía el nombre del destino.
+            # -----------------------------------------------------------------
+
+            id_previo = p.loc[
+                p["periodo"].eq(
+                    mes_previo
+                )
+                & p[
+                    "empresa_sbs"
+                ].eq(
+                    destino
+                ),
+                "id_empresa"
+            ].unique()
+
+            if len(id_previo) == 1:
+
+                p.loc[
+                    p[
+                        "id_empresa"
+                    ].eq(
+                        id_previo[0]
+                    ),
+                    "empresa"
+                ] = (
+                    f"{destino} "
+                    "(pre-fusión)"
+                )
+
+    # =========================================================================
+    # 11. CONTROLES FINALES
+    # =========================================================================
+
+    if p[
+        "id_empresa"
+    ].isna().any():
+
+        raise RuntimeError(
+            "Hay observaciones sin id_empresa."
+        )
+
+    if p[
+        "empresa"
+    ].isna().any():
+
+        raise RuntimeError(
+            "Hay observaciones sin nombre analítico estable."
+        )
+
+    duplicados_id = p.duplicated(
+        [
+            "periodo",
+            "id_empresa"
+        ]
+    )
+
+    if duplicados_id.any():
+
+        detalle = p.loc[
+            duplicados_id,
+            [
+                "periodo",
+                "id_empresa",
+                "empresa_sbs",
+                "empresa"
+            ]
+        ]
+
+        raise RuntimeError(
+            "Una identidad empresarial aparece "
+            "más de una vez en el mismo periodo:\n"
+            + detalle.to_string(
+                index=False
+            )
+        )
+
+    p = p.drop(
+        columns=[
+            "_clave_ortografica"
+        ]
+    )
+
+    return p
+
+
+# =============================================================================
+# 12. AUDITORÍA EN MEMORIA
+# =============================================================================
+
+def guardar_eventos_identidad(
+    eventos
+):
+    """
+    Conserva el control de eventos dentro de la ejecución.
+
+    No genera homologacion_empresas.csv ni otros archivos en /salidas.
+    """
+
+    if eventos is None:
+
+        reportar(
+            "Eventos societarios: "
+            "sin información para controlar."
+        )
+
+        return
+
+    reportar(
+        "Eventos societarios: "
+        f"{len(eventos):,} registros "
+        "conservados en memoria para control."
+    )
+
 
 
 # =============================================================================
 # BLOQUE 8B. VALIDACIÓN Y CONSOLIDACIÓN DE EVENTOS SOCIETARIOS
 # =============================================================================
-# Este bloque añade controles finales al resultado del Bloque 8.
+# Complementa los Bloques 8 y 8A.
 #
-# PASO 1. Rechaza continuidades absurdas del tipo A -> A.
-# PASO 2. Exige que origen y destino estén realmente observados en la ventana.
-# PASO 3. Exige continuidad temporal entre t y t+1.
-# PASO 4. Consolida notas duplicadas del mismo evento societario.
-# PASO 5. Conserva toda la evidencia SBS para auditoría.
+# Funciones:
+# 1. Validar las continuidades propuestas.
+# 2. Rechazar continuidades inválidas A -> A.
+# 3. Exigir presencia real de origen y destino.
+# 4. Exigir continuidad temporal t -> t+1.
+# 5. Consolidar notas duplicadas del mismo evento.
+# 6. Construir finalmente id_empresa mediante la función del Bloque 8A.
+#
+# No genera archivos en /salidas.
 # =============================================================================
 
 
 # =============================================================================
-# PASO 1. VALIDAR UNA CONTINUIDAD PROPUESTA
+# 1. VALIDAR UNA CONTINUIDAD PROPUESTA
 # =============================================================================
+
 def validar_continuidad_evento(evento, sbs):
     """
     Revisa si una continuidad propuesta puede aplicarse realmente
@@ -2667,16 +3741,30 @@ def validar_continuidad_evento(evento, sbs):
 
     evento = evento.copy()
 
-    if not bool(evento.get("aplicado", False)):
+    if not bool(
+        evento.get(
+            "aplicado",
+            False
+        )
+    ):
         return evento
 
-    origen = evento.get("continuidad_desde")
-    destino = evento.get("continuidad_hacia")
-    transicion = evento.get("periodo_transicion")
+    origen = evento.get(
+        "continuidad_desde"
+    )
+
+    destino = evento.get(
+        "continuidad_hacia"
+    )
+
+    transicion = evento.get(
+        "periodo_transicion"
+    )
 
     # -------------------------------------------------------------------------
-    # 1A. Deben existir origen, destino y periodo.
+    # 1A. Origen, destino y periodo deben existir.
     # -------------------------------------------------------------------------
+
     if (
         pd.isna(origen)
         or pd.isna(destino)
@@ -2685,93 +3773,156 @@ def validar_continuidad_evento(evento, sbs):
         or not str(destino).strip()
         or not str(transicion).strip()
     ):
-        evento["aplicado"] = False
-        evento["motivo"] = (
+
+        evento[
+            "aplicado"
+        ] = False
+
+        evento[
+            "motivo"
+        ] = (
             "Evento no aplicado: faltan origen, destino "
             "o periodo de transición verificables."
         )
+
         return evento
 
     # -------------------------------------------------------------------------
-    # 1B. Una empresa no puede homologarse consigo misma.
+    # 1B. No aceptar A -> A.
+    #
+    # También evita tratar como evento societario una diferencia
+    # meramente ortográfica como Qualitas -> Quálitas.
+    # Esa continuidad se resuelve mediante la clave ortográfica del 8A.
     # -------------------------------------------------------------------------
+
     if (
         sin_puntuacion(origen)
-        == sin_puntuacion(destino)
+        ==
+        sin_puntuacion(destino)
     ):
-        evento["aplicado"] = False
-        evento["motivo"] = (
-            "Evento documentado, pero no aplicado: "
-            "el origen y el destino identificados son el mismo nombre. "
-            "No genera una nueva continuidad dentro de la ventana."
+
+        evento[
+            "aplicado"
+        ] = False
+
+        evento[
+            "motivo"
+        ] = (
+            "Evento documentado, pero no aplicado como transición "
+            "societaria: origen y destino tienen la misma clave "
+            "normalizada. La continuidad ortográfica se trata por separado."
         )
+
         return evento
 
     # -------------------------------------------------------------------------
-    # 1C. El origen debe existir realmente en la base.
+    # 1C. Ambos nombres deben estar realmente observados.
     # -------------------------------------------------------------------------
+
     existe_origen = (
-        sbs["empresa_sbs"]
+        sbs[
+            "empresa_sbs"
+        ]
         .eq(origen)
         .any()
     )
 
-    # -------------------------------------------------------------------------
-    # 1D. El destino debe existir realmente en la base.
-    # -------------------------------------------------------------------------
     existe_destino = (
-        sbs["empresa_sbs"]
+        sbs[
+            "empresa_sbs"
+        ]
         .eq(destino)
         .any()
     )
 
-    if not existe_origen or not existe_destino:
-        evento["aplicado"] = False
-        evento["motivo"] = (
+    if (
+        not existe_origen
+        or not existe_destino
+    ):
+
+        evento[
+            "aplicado"
+        ] = False
+
+        evento[
+            "motivo"
+        ] = (
             "Evento societario documentado, pero no aplicado: "
-            "el nombre anterior o el posterior no está observado "
+            "el nombre anterior o posterior no está observado "
             "dentro de la ventana 2020-2025."
         )
+
         return evento
 
     # -------------------------------------------------------------------------
-    # 1E. Verificar continuidad exacta alrededor de la transición.
+    # 1D. Verificar continuidad t -> t+1.
     # -------------------------------------------------------------------------
+
+    transicion = str(
+        transicion
+    )
+
     mes_previo = periodo_anterior(
         transicion
     )
 
     origen_previo = (
-        sbs["periodo"].eq(mes_previo)
-        & sbs["empresa_sbs"].eq(origen)
+        sbs[
+            "periodo"
+        ].eq(mes_previo)
+        &
+        sbs[
+            "empresa_sbs"
+        ].eq(origen)
     ).any()
 
     destino_actual = (
-        sbs["periodo"].eq(transicion)
-        & sbs["empresa_sbs"].eq(destino)
+        sbs[
+            "periodo"
+        ].eq(transicion)
+        &
+        sbs[
+            "empresa_sbs"
+        ].eq(destino)
     ).any()
 
-    if not origen_previo or not destino_actual:
-        evento["aplicado"] = False
-        evento["motivo"] = (
+    if (
+        not origen_previo
+        or not destino_actual
+    ):
+
+        evento[
+            "aplicado"
+        ] = False
+
+        evento[
+            "motivo"
+        ] = (
             "Evento societario documentado, pero no aplicado: "
-            "no se verifica que el origen exista en el mes anterior "
-            "y el destino en el mes de transición."
+            "no se verifica origen en el mes anterior "
+            "y destino en el mes de transición."
         )
+
         return evento
 
     return evento
 
 
 # =============================================================================
-# PASO 2. VALIDAR TODOS LOS EVENTOS
+# 2. VALIDAR TODOS LOS EVENTOS
 # =============================================================================
-def validar_eventos_aplicados(eventos, sbs):
-    """
-    Aplica los controles anteriores a todos los eventos detectados.
-    """
 
-    if eventos is None or eventos.empty:
+def validar_eventos_aplicados(
+    eventos,
+    sbs
+):
+    """Aplica los controles anteriores a todos los eventos detectados."""
+
+    if (
+        eventos is None
+        or eventos.empty
+    ):
+
         return eventos.copy()
 
     revisados = []
@@ -2792,30 +3943,39 @@ def validar_eventos_aplicados(eventos, sbs):
 
 
 # =============================================================================
-# PASO 3. CONSOLIDAR EVENTOS DUPLICADOS
+# 3. CONSOLIDAR EVENTOS DUPLICADOS
 # =============================================================================
+
 def consolidar_eventos(eventos):
     """
-    Si dos o más notas SBS describen exactamente la misma continuidad,
-    se conserva una sola fila de evento y se acumula su evidencia.
+    Consolida varias notas SBS que describen una misma transición.
 
     Ejemplo:
-    SECREX -> CESCE PERÚ
-    puede aparecer en varias notas, pero es una sola transición societaria.
+    Secrex -> Cesce Perú puede aparecer en más de una nota, pero
+    representa una sola continuidad empresarial.
     """
 
-    if eventos is None or eventos.empty:
+    if (
+        eventos is None
+        or eventos.empty
+    ):
+
         return eventos.copy()
 
     no_aplicados = eventos[
-        ~eventos["aplicado"].eq(True)
+        ~eventos[
+            "aplicado"
+        ].eq(True)
     ].copy()
 
     aplicados = eventos[
-        eventos["aplicado"].eq(True)
+        eventos[
+            "aplicado"
+        ].eq(True)
     ].copy()
 
     if aplicados.empty:
+
         return eventos.copy()
 
     clave = [
@@ -2833,11 +3993,15 @@ def consolidar_eventos(eventos):
         sort=False
     ):
 
-        fila = grupo.iloc[0].copy()
+        fila = (
+            grupo.iloc[0]
+            .copy()
+        )
 
         # ---------------------------------------------------------------------
-        # 3A. Combinar evidencia textual distinta.
+        # Combinar evidencia SBS.
         # ---------------------------------------------------------------------
+
         evidencias = list(
             dict.fromkeys(
                 grupo[
@@ -2849,43 +4013,57 @@ def consolidar_eventos(eventos):
             )
         )
 
-        fila["evidencia_sbs"] = (
-            " || ".join(evidencias)
+        fila[
+            "evidencia_sbs"
+        ] = " || ".join(
+            evidencias
         )
 
         # ---------------------------------------------------------------------
-        # 3B. Combinar archivos de origen.
+        # Combinar archivos de origen.
         # ---------------------------------------------------------------------
+
         archivos = []
 
         for valor in grupo[
             "archivo_origen"
         ].dropna():
 
-            for archivo in str(valor).split(";"):
+            for archivo in str(
+                valor
+            ).split(";"):
 
-                archivo = archivo.strip()
+                archivo = (
+                    archivo.strip()
+                )
 
                 if (
                     archivo
                     and archivo not in archivos
                 ):
-                    archivos.append(archivo)
+                    archivos.append(
+                        archivo
+                    )
 
-        fila["archivo_origen"] = (
-            ";".join(archivos)
+        fila[
+            "archivo_origen"
+        ] = ";".join(
+            archivos
         )
 
         # ---------------------------------------------------------------------
-        # 3C. Combinar referencias de encabezado.
+        # Combinar referencias.
         # ---------------------------------------------------------------------
+
         referencias = []
 
         for valor in grupo[
             "referencias_detectadas"
         ].fillna(""):
 
-            for ref in str(valor).split(";"):
+            for ref in str(
+                valor
+            ).split(";"):
 
                 ref = ref.strip()
 
@@ -2893,22 +4071,30 @@ def consolidar_eventos(eventos):
                     ref
                     and ref not in referencias
                 ):
-                    referencias.append(ref)
+                    referencias.append(
+                        ref
+                    )
 
         fila[
             "referencias_detectadas"
-        ] = ";".join(referencias)
-
-        # ---------------------------------------------------------------------
-        # 3D. Registrar cuántas notas respaldan el mismo evento.
-        # ---------------------------------------------------------------------
-        fila["apariciones_nota"] = int(
-            grupo[
-                "apariciones_nota"
-            ].fillna(0).sum()
+        ] = ";".join(
+            referencias
         )
 
-        consolidados.append(fila)
+        # Número total de notas que respaldan el evento.
+        fila[
+            "apariciones_nota"
+        ] = int(
+            grupo[
+                "apariciones_nota"
+            ]
+            .fillna(0)
+            .sum()
+        )
+
+        consolidados.append(
+            fila
+        )
 
     aplicados_consolidados = pd.DataFrame(
         consolidados,
@@ -2927,30 +4113,45 @@ def consolidar_eventos(eventos):
 
 
 # =============================================================================
-# PASO 4. CONTROL FINAL DE EVENTOS
+# 4. CONTROL FINAL DE EVENTOS
 # =============================================================================
+
 def control_final_eventos(eventos):
     """
-    Impide que sobrevivan errores lógicos en las continuidades aplicadas.
+    Impide que sobrevivan errores lógicos entre las continuidades aplicadas.
     """
 
-    if eventos is None or eventos.empty:
+    if (
+        eventos is None
+        or eventos.empty
+    ):
         return
 
     aplicados = eventos[
-        eventos["aplicado"].eq(True)
+        eventos[
+            "aplicado"
+        ].eq(True)
     ]
 
+    if aplicados.empty:
+        return
+
     # -------------------------------------------------------------------------
-    # 4A. Nunca A -> A.
+    # 4A. Nunca puede sobrevivir una continuidad A -> A.
     # -------------------------------------------------------------------------
+
     mismo_nombre = aplicados.apply(
         lambda fila:
         sin_puntuacion(
-            fila["continuidad_desde"]
+            fila[
+                "continuidad_desde"
+            ]
         )
-        == sin_puntuacion(
-            fila["continuidad_hacia"]
+        ==
+        sin_puntuacion(
+            fila[
+                "continuidad_hacia"
+            ]
         ),
         axis=1
     )
@@ -2963,8 +4164,9 @@ def control_final_eventos(eventos):
         )
 
     # -------------------------------------------------------------------------
-    # 4B. No puede haber duplicados de la misma transición.
+    # 4B. No puede quedar duplicada una misma transición.
     # -------------------------------------------------------------------------
+
     clave = [
         "tipo_evento",
         "continuidad_desde",
@@ -2983,21 +4185,34 @@ def control_final_eventos(eventos):
 
 
 # =============================================================================
-# PASO 5. REEMPLAZAR HOMOLOGAR POR LA VERSIÓN CONTROLADA
+# 5. HOMOLOGACIÓN CONTROLADA DEFINITIVA
 # =============================================================================
+
 def homologar_controlado(
     sbs,
     notas,
     columnas_df,
     especiales=None,
-    guardar_auditoria=True
+    guardar_auditoria=False
 ):
     """
-    Versión definitiva de la homologación:
-    detecta -> valida -> consolida -> crea id_empresa -> controla.
+    Proceso definitivo:
+
+    detectar
+        ->
+    validar
+        ->
+    consolidar
+        ->
+    construir id_empresa
+        ->
+    controlar
     """
 
+    # -------------------------------------------------------------------------
     # 5.1. Detectar eventos con el Bloque 8.
+    # -------------------------------------------------------------------------
+
     eventos = evaluar_eventos(
         sbs,
         notas,
@@ -3005,43 +4220,71 @@ def homologar_controlado(
         especiales=especiales
     )
 
-    # 5.2. Invalidar continuidades que no son verificables.
+    # -------------------------------------------------------------------------
+    # 5.2. Validar propuestas.
+    # -------------------------------------------------------------------------
+
     eventos = validar_eventos_aplicados(
         eventos,
         sbs
     )
 
-    # 5.3. Consolidar duplicados documentales.
+    # -------------------------------------------------------------------------
+    # 5.3. Consolidar evidencia duplicada.
+    # -------------------------------------------------------------------------
+
     eventos = consolidar_eventos(
         eventos
     )
 
-    # 5.4. Control lógico previo.
+    # -------------------------------------------------------------------------
+    # 5.4. Control lógico.
+    # -------------------------------------------------------------------------
+
     control_final_eventos(
         eventos
     )
 
-    # 5.5. Crear las identidades empresariales.
+    # -------------------------------------------------------------------------
+    # 5.5. Construir identidades.
+    #
+    # IMPORTANTE:
+    # en este punto se utiliza construir_id_empresa() del Bloque 8A,
+    # porque 8A se carga después de 8 y antes de 8B.
+    # -------------------------------------------------------------------------
+
     sbs = construir_id_empresa(
         sbs,
         eventos
     )
 
-    # 5.6. Verificar las identidades resultantes.
+    # -------------------------------------------------------------------------
+    # 5.6. Verificar identidades.
+    # -------------------------------------------------------------------------
+
     controlar_identidades(
         sbs,
         eventos
     )
 
-    # 5.7. Guardar auditoría solo en ejecución definitiva.
+    # -------------------------------------------------------------------------
+    # 5.7. Mantener auditoría únicamente en memoria.
+    # -------------------------------------------------------------------------
+
     if guardar_auditoria:
 
         guardar_eventos_identidad(
             eventos
         )
 
+    # -------------------------------------------------------------------------
+    # 5.8. Reportar.
+    # -------------------------------------------------------------------------
+
     aplicados = eventos[
-        eventos["aplicado"].eq(True)
+        eventos[
+            "aplicado"
+        ].eq(True)
     ]
 
     reportar(
@@ -3057,8 +4300,7 @@ def homologar_controlado(
     for _, evento in aplicados.iterrows():
 
         reportar(
-            "  "
-            f"{evento['continuidad_desde']} "
+            f"  {evento['continuidad_desde']} "
             "-> "
             f"{evento['continuidad_hacia']} "
             "| transición "
@@ -3072,7 +4314,10 @@ def homologar_controlado(
         f"{sbs['id_empresa'].nunique()}."
     )
 
-    return sbs, eventos
+    return (
+        sbs,
+        eventos
+    )
 
 
 # =============================================================================
@@ -3600,181 +4845,99 @@ def transformar(base):
 
 
 # =============================================================================
-# BLOQUE 12. DIAGNÓSTICOS
-# No elimina ni modifica observaciones.
+# BLOQUE 12. DIAGNÓSTICOS DE VALORES Y OUTLIERS
+# =============================================================================
+# Los diagnósticos NO eliminan, reemplazan ni winsorizan observaciones.
+# Los resultados se muestran en consola/log.
+# No se crean archivos en /salidas.
 # =============================================================================
 
+
 def categorias(serie):
-    """
-    Clasifica valores para diagnóstico.
-    """
+    """Clasifica valores para diagnóstico."""
 
     return {
-        "positivos_>=1":
-            int(
-                (serie >= 1).sum()
-            ),
-
-        "entre_0_y_1":
-            int(
-                (
-                    (serie > 0)
-                    & (serie < 1)
-                ).sum()
-            ),
-
-        "ceros":
-            int(
-                (serie == 0).sum()
-            ),
-
-        "negativos":
-            int(
-                (serie < 0).sum()
-            ),
-
-        "faltantes":
-            int(
-                serie.isna().sum()
-            ),
+        "positivos_>=1": int((serie >= 1).sum()),
+        "entre_0_y_1": int(((serie > 0) & (serie < 1)).sum()),
+        "ceros": int((serie == 0).sum()),
+        "negativos": int((serie < 0).sum()),
+        "faltantes": int(serie.isna().sum()),
     }
 
 
-def detectar_outliers_iqr(
-    base,
-    columnas
-):
+def detectar_outliers_iqr(base, columnas):
     """
-    Señala outliers mediante 1.5 × IQR.
-    No elimina ni winsoriza observaciones.
+    Detecta valores atípicos mediante 1.5 × IQR.
+
+    Es únicamente diagnóstico:
+    NO elimina ni modifica observaciones.
     """
 
     filas = []
 
     for col in columnas:
 
-        serie = (
-            base[col]
-            .dropna()
-        )
+        serie = base[col].dropna()
 
         if len(serie) < 4:
             continue
 
-        q1, q3 = (
-            serie.quantile(
-                [0.25, 0.75]
-            )
-        )
+        q1, q3 = serie.quantile([0.25, 0.75])
 
         iqr = q3 - q1
 
-        inferior = (
-            q1 - 1.5 * iqr
-        )
-
-        superior = (
-            q3 + 1.5 * iqr
-        )
+        inferior = q1 - 1.5 * iqr
+        superior = q3 + 1.5 * iqr
 
         mask = (
             base[col].notna()
-            & (
+            &
+            (
                 (base[col] < inferior)
-                | (base[col] > superior)
+                |
+                (base[col] > superior)
             )
         )
 
-        columnas_id = [
-            c
-            for c in [
-                "id_observacion",
-                "periodo",
-                "id_empresa",
-                "empresa",
-                col,
-            ]
-            if c in base.columns
-        ]
-
         for _, fila in base.loc[
             mask,
-            columnas_id
+            ["periodo", "id_empresa", "empresa", col]
         ].iterrows():
 
-            registro = {
-                "periodo":
-                    fila["periodo"],
+            filas.append({
+                "periodo": fila["periodo"],
+                "id_empresa": fila["id_empresa"],
+                "empresa": fila["empresa"],
+                "variable": col,
+                "valor": fila[col],
+                "q1": q1,
+                "q3": q3,
+                "limite_inferior": inferior,
+                "limite_superior": superior,
+            })
 
-                "id_empresa":
-                    fila["id_empresa"],
-
-                "empresa":
-                    fila["empresa"],
-
-                "variable":
-                    col,
-
-                "valor":
-                    fila[col],
-
-                "q1":
-                    q1,
-
-                "q3":
-                    q3,
-
-                "limite_inferior":
-                    inferior,
-
-                "limite_superior":
-                    superior,
-            }
-
-            if (
-                "id_observacion"
-                in fila.index
-            ):
-
-                registro[
-                    "id_observacion"
-                ] = fila[
-                    "id_observacion"
-                ]
-
-            filas.append(
-                registro
-            )
-
-    return pd.DataFrame(
-        filas
-    )
+    return pd.DataFrame(filas)
 
 
 def diagnosticar(
     base,
     largo,
-    guardar_detalle=True
+    guardar_detalle=False
 ):
     """
-    Reporta formatos, ceros, negativos,
-    faltantes y outliers.
+    Reporta ceros, negativos, faltantes y outliers.
+
+    guardar_detalle se conserva por compatibilidad,
+    pero no se generan archivos auxiliares.
     """
 
-    # -------------------------------------------------------------------------
-    # PASO 1. Formato original SBS.
-    # -------------------------------------------------------------------------
     reportar(
         "\nCómo venían las celdas TOTAL en los XLS:"
     )
 
     for tipo, n in (
-        largo[
-            "tipo_valor"
-        ]
-        .value_counts(
-            dropna=False
-        )
+        largo["tipo_valor"]
+        .value_counts(dropna=False)
         .items()
     ):
 
@@ -3782,20 +4945,17 @@ def diagnosticar(
             f"  {tipo}: {n}"
         )
 
-    # -------------------------------------------------------------------------
-    # PASO 2. Diagnóstico cuantitativo.
-    # -------------------------------------------------------------------------
-    reportar(
-        "\nDiagnóstico por variable "
-        "(miles de S/ corrientes):"
-    )
-
     cols = [
         "primas_netas_acum_sbs",
         "primas_netas_mensual_nominal",
         "primas_cedidas_acum_sbs",
         "primas_cedidas_mensual_nominal",
     ]
+
+    reportar(
+        "\nDiagnóstico por variable "
+        "(miles de S/ corrientes):"
+    )
 
     for col in cols:
 
@@ -3807,59 +4967,47 @@ def diagnosticar(
             f"  {col:<34} "
             + " | ".join(
                 f"{k}={v}"
-                for k, v
-                in resultado.items()
+                for k, v in resultado.items()
             )
         )
 
     # -------------------------------------------------------------------------
-    # PASO 3. Negativos.
+    # Negativos
     # -------------------------------------------------------------------------
+
     negativos = base[
-        (
-            base[
-                "primas_netas_mensual_nominal"
-            ] < 0
-        )
+        (base["primas_netas_mensual_nominal"] < 0)
         |
-        (
-            base[
-                "primas_cedidas_mensual_nominal"
-            ] < 0
-        )
+        (base["primas_cedidas_mensual_nominal"] < 0)
     ].copy()
 
     reportar(
         "\nFlujos mensuales negativos: "
-        f"{len(negativos):,} "
-        "(se conservan; pueden representar "
-        "ajustes contables)."
+        f"{len(negativos):,}. "
+        "Se conservan como ajustes observados; "
+        "no se reemplazan por cero."
     )
 
     if not negativos.empty:
 
         for _, fila in (
             negativos
-            .sort_values(
-                ["empresa", "periodo"]
-            )
+            .sort_values(["empresa", "periodo"])
             .head(10)
             .iterrows()
         ):
 
             reportar(
-                f"  Ejemplo: "
-                f"{fila['periodo']} | "
+                f"  {fila['periodo']} | "
                 f"{fila['empresa']} | "
-                f"netas="
-                f"{fila['primas_netas_mensual_nominal']} | "
-                f"cedidas="
-                f"{fila['primas_cedidas_mensual_nominal']}"
+                f"netas={fila['primas_netas_mensual_nominal']} | "
+                f"cedidas={fila['primas_cedidas_mensual_nominal']}"
             )
 
     # -------------------------------------------------------------------------
-    # PASO 4. Outliers IQR.
+    # Outliers
     # -------------------------------------------------------------------------
+
     outliers = detectar_outliers_iqr(
         base,
         [
@@ -3869,74 +5017,44 @@ def diagnosticar(
     )
 
     reportar(
-        f"Outliers IQR señalados: "
-        f"{len(outliers):,}; "
-        "no se eliminan ni winsorizan."
+        f"\nOutliers señalados por IQR: "
+        f"{len(outliers):,}. "
+        "No se eliminan ni winsorizan."
     )
 
     # -------------------------------------------------------------------------
-    # PASO 5. Guardar diagnósticos.
+    # Muestra
     # -------------------------------------------------------------------------
-    if guardar_detalle:
 
-        negativos.to_csv(
-            CARPETA_SALIDAS
-            / "diagnostico_negativos.csv",
-            index=False,
-            encoding="utf-8"
-        )
-
-        if outliers.empty:
-
-            outliers = pd.DataFrame(
-                columns=[
-                    "id_observacion",
-                    "periodo",
-                    "id_empresa",
-                    "empresa",
-                    "variable",
-                    "valor",
-                    "q1",
-                    "q3",
-                    "limite_inferior",
-                    "limite_superior",
-                ]
-            )
-
-        outliers.to_csv(
-            CARPETA_SALIDAS
-            / "diagnostico_outliers.csv",
-            index=False,
-            encoding="utf-8"
-        )
-
-    # -------------------------------------------------------------------------
-    # PASO 6. Tamaño de muestra.
-    # -------------------------------------------------------------------------
-    reportar(
-        f"\nObservaciones en la base: "
-        f"{len(base):,}"
+    muestra = int(
+        base["muestra_modelo"].sum()
     )
 
     reportar(
-        "muestra_modelo=True: "
-        f"{int(base['muestra_modelo'].sum()):,}"
+        f"\nObservaciones totales: {len(base):,}"
     )
 
     reportar(
-        "muestra_modelo=False: "
-        f"{int((~base['muestra_modelo']).sum()):,}"
+        f"Observaciones utilizables en el modelo: {muestra:,}"
     )
+
+    reportar(
+        f"Observaciones fuera de muestra del modelo: "
+        f"{len(base) - muestra:,}"
+    )
+
+    return negativos, outliers
 
 
 # =============================================================================
 # BLOQUE 13. CONTROLES FINALES
 # =============================================================================
 
+
 def controles_finales(base):
     """
-    Verifica estructura, llaves, cobertura temporal
-    y tamaño mínimo de la base procesada.
+    Verifica estructura, identificadores, cobertura temporal,
+    tamaño de la base y variables sustantivas.
     """
 
     reportar(
@@ -3944,143 +5062,134 @@ def controles_finales(base):
     )
 
     # -------------------------------------------------------------------------
-    # PASO 1. Exactamente 72 meses.
+    # 1. Cobertura temporal
     # -------------------------------------------------------------------------
+
     encontrados = sorted(
-        base[
-            "periodo"
-        ]
+        base["periodo"]
         .dropna()
         .astype(str)
         .unique()
         .tolist()
     )
 
-    esperados = (
-        periodos_esperados()
-    )
+    esperados = periodos_esperados()
 
     if encontrados != esperados:
 
         raise RuntimeError(
-            "La base final no contiene "
-            "exactamente los 72 meses. "
-            f"Faltan="
-            f"{sorted(set(esperados) - set(encontrados))}; "
-            f"sobran="
-            f"{sorted(set(encontrados) - set(esperados))}"
+            "La base final no contiene exactamente los 72 meses. "
+            f"Faltan={sorted(set(esperados) - set(encontrados))}; "
+            f"sobran={sorted(set(encontrados) - set(esperados))}"
+        )
+
+    reportar(
+        f"  Periodo: {FECHA_INICIO} a {FECHA_CORTE} | "
+        f"meses={len(encontrados)}"
+    )
+
+    # -------------------------------------------------------------------------
+    # 2. Columnas finales exactas
+    # -------------------------------------------------------------------------
+
+    columnas_esperadas = (
+        ["id_observacion"]
+        + COLUMNAS_FINALES
+    )
+
+    if base.columns.tolist() != columnas_esperadas:
+
+        raise RuntimeError(
+            "Las columnas finales no coinciden con la estructura definida.\n"
+            f"Esperadas={columnas_esperadas}\n"
+            f"Obtenidas={base.columns.tolist()}"
         )
 
     # -------------------------------------------------------------------------
-    # PASO 2. Identificadores.
+    # 3. Identificadores
     # -------------------------------------------------------------------------
+
     identificadores = [
         "id_observacion",
         "periodo",
         "id_empresa",
         "empresa",
-        "empresa_sbs",
     ]
 
-    faltan_columnas = [
-        col
-        for col in identificadores
-        if col not in base.columns
-    ]
-
-    if faltan_columnas:
+    if base[
+        identificadores
+    ].isna().any().any():
 
         raise RuntimeError(
-            "Faltan columnas identificadoras: "
-            + ", ".join(
-                faltan_columnas
-            )
+            "Hay identificadores vacíos en la base final."
         )
 
-    if (
-        base[
-            identificadores
-        ]
-        .isna()
-        .any()
-        .any()
-    ):
-
-        raise RuntimeError(
-            "Hay identificadores vacíos "
-            "en la base final."
-        )
-
-    # -------------------------------------------------------------------------
-    # PASO 3. id_observacion único y correlativo.
-    # -------------------------------------------------------------------------
-    if (
-        base[
-            "id_observacion"
-        ].duplicated().any()
-    ):
+    if base["id_observacion"].duplicated().any():
 
         raise RuntimeError(
             "Hay id_observacion duplicados."
         )
 
-    esperado_id = list(
-        range(
-            1,
-            len(base) + 1
-        )
-    )
-
-    if (
-        base[
-            "id_observacion"
-        ].tolist()
-        != esperado_id
+    if base["id_observacion"].tolist() != list(
+        range(1, len(base) + 1)
     ):
 
         raise RuntimeError(
-            "id_observacion no es "
-            "correlativo de 1 a N."
+            "id_observacion no es correlativo de 1 a N."
         )
 
-    reportar(
-        f"  id_observacion: "
-        f"1 a {len(base):,}, "
-        "sin duplicados."
-    )
+    # -------------------------------------------------------------------------
+    # 4. Una observación por empresa y mes
+    # -------------------------------------------------------------------------
 
-    # -------------------------------------------------------------------------
-    # PASO 4. Un id_empresa por periodo.
-    # -------------------------------------------------------------------------
     duplicados = int(
         base.duplicated(
-            [
-                "periodo",
-                "id_empresa"
-            ]
+            ["periodo", "id_empresa"]
         ).sum()
-    )
-
-    reportar(
-        "  Duplicados "
-        "id_empresa × periodo: "
-        f"{duplicados}"
     )
 
     if duplicados:
 
         raise RuntimeError(
-            "Hay duplicados "
-            "id_empresa × periodo."
+            "Hay duplicados id_empresa × periodo."
+        )
+
+    reportar(
+        "  Duplicados id_empresa × periodo: 0"
+    )
+
+    # -------------------------------------------------------------------------
+    # 5. Nombre analítico estable
+    # -------------------------------------------------------------------------
+
+    nombres_por_id = (
+        base.groupby("id_empresa")["empresa"]
+        .nunique()
+    )
+
+    if (nombres_por_id != 1).any():
+
+        raise RuntimeError(
+            "Hay id_empresa con más de un nombre analítico."
         )
 
     # -------------------------------------------------------------------------
-    # PASO 5. Balance del panel.
+    # 6. Identidades
     # -------------------------------------------------------------------------
+
+    n_identidades = (
+        base["id_empresa"].nunique()
+    )
+
+    if n_identidades != 20:
+
+        raise RuntimeError(
+            f"Se esperaban 20 identidades empresariales "
+            f"y se obtuvieron {n_identidades}."
+        )
+
     meses_por_empresa = (
-        base.groupby(
-            "id_empresa"
-        )["periodo"]
+        base.groupby("id_empresa")["periodo"]
         .nunique()
     )
 
@@ -4092,54 +5201,39 @@ def controles_finales(base):
     )
 
     reportar(
-        f"  Periodo: "
-        f"{FECHA_INICIO} a "
-        f"{FECHA_CORTE} | meses=72"
-    )
-
-    reportar(
-        "  Identidades empresariales: "
-        f"{base['id_empresa'].nunique()} | "
+        f"  Identidades empresariales: {n_identidades} | "
         f"panel "
-        f"{'balanceado' if balanceado else 'NO balanceado'} "
-        f"(mínimo="
-        f"{meses_por_empresa.min()} meses; "
-        f"máximo="
-        f"{meses_por_empresa.max()})"
+        f"{'balanceado' if balanceado else 'NO balanceado'} | "
+        f"mínimo={meses_por_empresa.min()} meses | "
+        f"máximo={meses_por_empresa.max()} meses"
     )
 
     # -------------------------------------------------------------------------
-    # PASO 6. Mínimo de observaciones.
+    # 7. Tamaño mínimo
     # -------------------------------------------------------------------------
-    reportar(
-        f"  Observaciones: "
-        f"{len(base):,} "
-        f"(mínimo exigido: "
-        f"{MINIMO_OBSERVACIONES:,})"
-    )
 
-    if (
-        len(base)
-        < MINIMO_OBSERVACIONES
-    ):
+    if len(base) < MINIMO_OBSERVACIONES:
 
         raise RuntimeError(
-            "La base procesada tiene "
-            f"menos de "
-            f"{MINIMO_OBSERVACIONES} "
-            "observaciones."
+            f"La base procesada tiene menos de "
+            f"{MINIMO_OBSERVACIONES:,} observaciones."
         )
 
     if base.shape[1] < 6:
 
         raise RuntimeError(
-            "La base final tiene "
-            "menos de 6 columnas."
+            "La base final tiene menos de 6 columnas."
         )
 
+    reportar(
+        f"  Observaciones: {len(base):,} "
+        f"(mínimo exigido: {MINIMO_OBSERVACIONES:,})"
+    )
+
     # -------------------------------------------------------------------------
-    # PASO 7. Variables sustantivas.
+    # 8. Variables sustantivas
     # -------------------------------------------------------------------------
+
     sustantivas = [
         "log_primas_reales",
         "log_primas_cedidas",
@@ -4147,90 +5241,69 @@ def controles_finales(base):
         "tasa_referencia",
     ]
 
-    faltan_sustantivas = [
+    faltan = [
         col
         for col in sustantivas
         if col not in base.columns
     ]
 
-    if faltan_sustantivas:
+    if faltan:
 
         raise RuntimeError(
             "Faltan variables sustantivas: "
-            + ", ".join(
-                faltan_sustantivas
-            )
+            + ", ".join(faltan)
         )
 
     # -------------------------------------------------------------------------
-    # PASO 8. Verificar presencia de SBS y BCRP.
+    # 9. Presencia de ambas fuentes
     # -------------------------------------------------------------------------
+
     if not {
         "primas_netas_acum_sbs",
         "primas_cedidas_acum_sbs",
-    }.issubset(
-        base.columns
-    ):
+    }.issubset(base.columns):
 
         raise RuntimeError(
-            "No están presentes "
-            "las variables fuente SBS."
+            "No están presentes las variables fuente SBS."
         )
 
     if not {
         "ingreso_formal_nominal",
         "tasa_referencia",
         "ipc",
-    }.issubset(
-        base.columns
-    ):
+    }.issubset(base.columns):
 
         raise RuntimeError(
-            "No están presentes "
-            "las variables fuente BCRP."
+            "No están presentes las variables fuente BCRP."
         )
 
     # -------------------------------------------------------------------------
-    # PASO 9. Muestra del modelo.
+    # 10. Muestra del modelo
     # -------------------------------------------------------------------------
+
     muestra = int(
-        base[
-            "muestra_modelo"
-        ].sum()
+        base["muestra_modelo"].sum()
     )
 
     reportar(
-        f"  muestra_modelo=True: "
-        f"{muestra:,}"
+        f"  Muestra disponible para el modelo: "
+        f"{muestra:,} de {len(base):,}"
     )
 
-    if (
-        muestra
-        < MINIMO_OBSERVACIONES
-    ):
-
-        reportar(
-            "  AVISO: muestra_modelo "
-            f"tiene {muestra:,} observaciones; "
-            "el requisito de 1,000 "
-            "se evalúa sobre la base procesada."
-        )
-
     # -------------------------------------------------------------------------
-    # PASO 10. Faltantes.
+    # 11. Faltantes
     # -------------------------------------------------------------------------
+
     reportar(
-        "  No vacíos / faltantes por variable:"
+        "  Faltantes por variable:"
     )
 
     for col in base.columns:
 
         reportar(
             f"    {col:<34} "
-            f"no vacíos="
-            f"{int(base[col].notna().sum()):>6,} | "
-            f"faltantes="
-            f"{int(base[col].isna().sum()):>5,}"
+            f"no vacíos={int(base[col].notna().sum()):>6,} | "
+            f"faltantes={int(base[col].isna().sum()):>5,}"
         )
 
 
@@ -4238,10 +5311,9 @@ def controles_finales(base):
 # BLOQUE 14. GUARDADO, LOG Y SHA-256
 # =============================================================================
 
+
 def escribir_log(texto):
-    """
-    Añade una línea al log con fecha y hora.
-    """
+    """Añade al log una línea con fecha y hora."""
 
     ahora = datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S"
@@ -4266,13 +5338,11 @@ def escribir_log(texto):
 
 def guardar(base):
     """
-    Guarda la base procesada,
-    calcula SHA-256 y registra la ejecución.
+    Guarda la base procesada y calcula su SHA-256.
+
+    /salidas se reserva para las tablas y figuras del Script 04.
     """
 
-    # -------------------------------------------------------------------------
-    # PASO 1. Guardar CSV.
-    # -------------------------------------------------------------------------
     ruta = (
         CARPETA_PROC
         / f"datos_procesados_{MATRICULA}.csv"
@@ -4281,13 +5351,10 @@ def guardar(base):
     base.to_csv(
         ruta,
         index=False,
-        encoding="utf-8",
+        encoding=CSV_ENCODING,
         float_format="%.6f"
     )
 
-    # -------------------------------------------------------------------------
-    # PASO 2. Calcular SHA-256.
-    # -------------------------------------------------------------------------
     huella = hashlib.sha256(
         ruta.read_bytes()
     ).hexdigest()
@@ -4303,9 +5370,6 @@ def guardar(base):
         f"SHA-256: {huella}"
     )
 
-    # -------------------------------------------------------------------------
-    # PASO 3. Registrar log.
-    # -------------------------------------------------------------------------
     escribir_log(
         f"PROCESADO {ruta.name} | "
         f"filas={len(base)} | "
@@ -4315,37 +5379,32 @@ def guardar(base):
         f"sha256={huella}"
     )
 
-    # -------------------------------------------------------------------------
-    # PASO 4. Guardar informe de controles.
-    # -------------------------------------------------------------------------
-    ARCHIVO_CONTROL.write_text(
-        "\n".join(REPORTE) + "\n",
-        encoding="utf-8"
-    )
-
-    print(
-        "Informe de control: "
-        "salidas/control_03_limpieza.txt"
-    )
+    return ruta, huella
 
 
 # =============================================================================
-# BLOQUE 15. PRUEBAS PREVIAS Y EJECUCIÓN PRINCIPAL
+# BLOQUE 15. EJECUCIÓN PRINCIPAL
 # =============================================================================
 
-def preparar_base(guardar_auditoria):
+
+def preparar_base():
     """
-    Ejecuta el pipeline completo del Script 03.
+    Ejecuta todo el pipeline del Script 03.
+
+    Los controles se muestran en consola/log.
+    No se generan archivos auxiliares en /salidas.
     """
 
     # -------------------------------------------------------------------------
-    # PASO 1. BCRP.
+    # 1. BCRP
     # -------------------------------------------------------------------------
+
     bcrp = cargar_bcrp()
 
     # -------------------------------------------------------------------------
-    # PASO 2. SBS.
+    # 2. SBS
     # -------------------------------------------------------------------------
+
     (
         sbs,
         largo,
@@ -4353,20 +5412,17 @@ def preparar_base(guardar_auditoria):
         columnas_df,
         comparacion
     ) = cargar_sbs(
-        guardar_auditoria=
-        guardar_auditoria
+        guardar_auditoria=False
     )
 
-    if guardar_auditoria:
-
-        guardar_notas(
-            notas
-        )
+    resumir_notas(
+        notas
+    )
 
     # -------------------------------------------------------------------------
-    # PASO 3. Registros especiales SBS.
-    # Ejemplo: MAPFRE Perú (abs).
+    # 3. Depuración de registros especiales
     # -------------------------------------------------------------------------
+
     (
         sbs,
         largo,
@@ -4377,25 +5433,13 @@ def preparar_base(guardar_auditoria):
         largo,
         notas,
         columnas_df,
-        guardar_auditoria=
-        guardar_auditoria
+        guardar_auditoria=False
     )
 
-    # Sobrescribe la comparación inicial
-    # con la comparación después de depurar especiales.
-    if guardar_auditoria:
-
-        comparacion.to_csv(
-            CARPETA_SALIDAS
-            / "comparacion_p009_p010.csv",
-            index=False,
-            encoding="utf-8"
-        )
-
     # -------------------------------------------------------------------------
-    # PASO 4. Identidad empresarial.
-    # Usa Bloque 8 + control Bloque 8B.
+    # 4. Identidad empresarial
     # -------------------------------------------------------------------------
+
     (
         sbs,
         eventos
@@ -4403,22 +5447,20 @@ def preparar_base(guardar_auditoria):
         sbs,
         notas,
         columnas_df,
-        especiales=
-        registros_especiales,
-        guardar_auditoria=
-        guardar_auditoria
+        especiales=registros_especiales,
+        guardar_auditoria=False
     )
 
-    if guardar_auditoria:
-
-        guardar_presencia_y_trayectoria(
-            sbs,
-            eventos
-        )
+    # Control descriptivo de trayectorias.
+    guardar_presencia_y_trayectoria(
+        sbs,
+        eventos
+    )
 
     # -------------------------------------------------------------------------
-    # PASO 5. Desacumulación.
+    # 5. Desacumulación
     # -------------------------------------------------------------------------
+
     reportar(
         "\nDesacumulación:"
     )
@@ -4432,23 +5474,26 @@ def preparar_base(guardar_auditoria):
     )
 
     # -------------------------------------------------------------------------
-    # PASO 6. Integrar SBS + BCRP.
+    # 6. Integración SBS + BCRP
     # -------------------------------------------------------------------------
+
     base = integrar(
         sbs,
         bcrp
     )
 
     # -------------------------------------------------------------------------
-    # PASO 7. Deflactar y calcular logaritmos.
+    # 7. Deflactación y logaritmos
     # -------------------------------------------------------------------------
+
     base = transformar(
         base
     )
 
     # -------------------------------------------------------------------------
-    # PASO 8. Seleccionar y ordenar columnas.
+    # 8. Selección de columnas finales
     # -------------------------------------------------------------------------
+
     base = (
         base[
             COLUMNAS_FINALES
@@ -4465,8 +5510,9 @@ def preparar_base(guardar_auditoria):
     )
 
     # -------------------------------------------------------------------------
-    # PASO 9. Crear id_observacion.
+    # 9. ID único de observación
     # -------------------------------------------------------------------------
+
     base.insert(
         0,
         "id_observacion",
@@ -4477,20 +5523,39 @@ def preparar_base(guardar_auditoria):
     )
 
     # -------------------------------------------------------------------------
-    # PASO 10. Diagnósticos.
+    # 10. Diagnósticos
     # -------------------------------------------------------------------------
+
     diagnosticar(
         base,
         largo,
-        guardar_detalle=
-        guardar_auditoria
+        guardar_detalle=False
     )
 
     # -------------------------------------------------------------------------
-    # PASO 11. Controles finales.
+    # 11. Controles finales
     # -------------------------------------------------------------------------
+
     controles_finales(
         base
+    )
+
+    # -------------------------------------------------------------------------
+    # 12. Codificación final de muestra_modelo
+    # -------------------------------------------------------------------------
+    # Internamente fue booleana.
+    # En el CSV final se exporta como:
+    # 1 = observación utilizable
+    # 0 = observación no utilizable
+    # -------------------------------------------------------------------------
+
+    base[
+        "muestra_modelo"
+    ] = (
+        base[
+            "muestra_modelo"
+        ]
+        .astype("int8")
     )
 
     return base
@@ -4498,12 +5563,8 @@ def preparar_base(guardar_auditoria):
 
 def pruebas_previas():
     """
-    Ejecuta los 72 meses completamente en memoria.
-
-    No guarda:
-    - datos procesados;
-    - auditorías;
-    - log definitivo.
+    Ejecuta todo el pipeline en memoria,
+    pero no guarda el CSV procesado.
     """
 
     reportar(
@@ -4511,25 +5572,21 @@ def pruebas_previas():
     )
 
     reportar(
-        "PRUEBAS PREVIAS DEL SCRIPT 03 "
-        "— SIN GUARDAR BASE DEFINITIVA"
+        "PRUEBA COMPLETA DEL SCRIPT 03"
     )
 
     reportar(
         "=" * 78
     )
 
-    base = preparar_base(
-        guardar_auditoria=False
+    base = preparar_base()
+
+    reportar(
+        "\nPRUEBA COMPLETA SUPERADA."
     )
 
     reportar(
-        "\nPRUEBAS PREVIAS SUPERADAS."
-    )
-
-    reportar(
-        "Resultado en memoria: "
-        f"{len(base):,} filas × "
+        f"Resultado: {len(base):,} filas × "
         f"{base.shape[1]} columnas."
     )
 
@@ -4537,9 +5594,7 @@ def pruebas_previas():
 
 
 def main():
-    """
-    Ejecución definitiva.
-    """
+    """Ejecución definitiva."""
 
     reportar(
         "=" * 78
@@ -4547,23 +5602,15 @@ def main():
 
     reportar(
         "SCRIPT 03 — LIMPIEZA E INTEGRACIÓN "
-        "| empresa × mes "
-        f"| {FECHA_INICIO} a {FECHA_CORTE}"
-    )
-
-    reportar(
-        "El balance del panel se determina "
-        "a partir de la presencia efectiva "
-        "de empresas."
+        f"| empresa × mes | "
+        f"{FECHA_INICIO} a {FECHA_CORTE}"
     )
 
     reportar(
         "=" * 78
     )
 
-    base = preparar_base(
-        guardar_auditoria=True
-    )
+    base = preparar_base()
 
     guardar(
         base
@@ -4578,10 +5625,7 @@ if __name__ == "__main__":
 
     try:
 
-        if (
-            "--pruebas"
-            in sys.argv
-        ):
+        if "--pruebas" in sys.argv:
 
             pruebas_previas()
 
@@ -4598,25 +5642,11 @@ if __name__ == "__main__":
 
         print(
             "\n[ERROR] "
-            "El script 03 se detuvo: "
+            "El Script 03 se detuvo: "
             f"{mensaje}"
         )
 
-        if (
-            "--pruebas"
-            not in sys.argv
-        ):
-
-            REPORTE.append(
-                f"\n[ERROR] {mensaje}"
-            )
-
-            ARCHIVO_CONTROL.write_text(
-                "\n".join(
-                    REPORTE
-                ) + "\n",
-                encoding="utf-8"
-            )
+        if "--pruebas" not in sys.argv:
 
             escribir_log(
                 "ERROR SCRIPT 03 | "
