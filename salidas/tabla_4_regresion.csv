@@ -1,0 +1,12 @@
+﻿,(1) MCO agrupado,(2) EF empresa,(3) EF empresa + mes del año
+ln primas cedidas reales (X1),0.4258***,0.2730***,0.2579***
+,(0.0940),(0.0852),(0.0731)
+ln ingreso formal real (X2),0.1511**,0.2025***,2.1789*
+,(0.0687),(0.0473),(1.2529)
+Tasa de referencia (X3),0.0180,0.0263***,0.0357***
+,(0.0170),(0.0086),(0.0124)
+Efectos fijos de empresa,No,Sí,Sí
+Indicadores de mes del año,No,No,Sí
+Observaciones,"1,254","1,254","1,254"
+Empresas,20,20,20
+R²,0.428,0.317 (dentro),0.338 (dentro)

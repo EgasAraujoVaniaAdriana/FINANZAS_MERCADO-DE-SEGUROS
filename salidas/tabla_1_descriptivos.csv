@@ -1,0 +1,8 @@
+﻿Variable,N,Media,DE,Mediana,Mín.,Máx.
+Primas netas mensuales reales (miles S/ dic-2021),1277,85984.918,126949.478,30441.798,-56.668,764285.32
+Primas cedidas mensuales reales (miles S/ dic-2021),1277,21489.082,40240.405,4467.837,-177.87,380734.703
+Ingreso formal real (S/ dic-2021),1277,2989.112,599.052,2698.319,2483.505,4463.364
+Tasa de referencia (%),1277,3.989,2.711,4.5,0.25,7.75
+ln primas netas reales (Y),1256,10.393,1.534,10.379,1.213,13.547
+ln primas cedidas reales (X1),1255,8.28,2.348,8.435,-0.037,12.85
+ln ingreso formal real (X2),1277,7.985,0.181,7.9,7.817,8.404

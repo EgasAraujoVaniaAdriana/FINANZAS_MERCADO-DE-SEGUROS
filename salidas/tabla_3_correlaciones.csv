@@ -1,0 +1,5 @@
+﻿Variable,ln primas netas reales (Y),ln primas cedidas reales (X1),ln ingreso formal real (X2),Tasa de referencia (X3)
+ln primas netas reales (Y),1.0,0.653,0.029,0.082
+ln primas cedidas reales (X1),0.653,1.0,0.019,0.078
+ln ingreso formal real (X2),0.029,0.019,1.0,-0.053
+Tasa de referencia (X3),0.082,0.078,-0.053,1.0

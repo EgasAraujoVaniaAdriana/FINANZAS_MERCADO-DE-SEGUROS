@@ -1,0 +1,22 @@
+\begin{table}[htbp]
+\caption{Determinantes de las primas netas reales: estimaciones de panel}
+\label{tab:tabla_4_regresion}
+\begin{tabular}{llll}
+\toprule
+ & (1) MCO agrupado & (2) EF empresa & (3) EF empresa + mes del año \\
+\midrule
+ln primas cedidas reales (X1) & 0.4258*** & 0.2730*** & 0.2579*** \\
+ & (0.0940) & (0.0852) & (0.0731) \\
+ln ingreso formal real (X2) & 0.1511** & 0.2025*** & 2.1789* \\
+ & (0.0687) & (0.0473) & (1.2529) \\
+Tasa de referencia (X3) & 0.0180 & 0.0263*** & 0.0357*** \\
+ & (0.0170) & (0.0086) & (0.0124) \\
+Efectos fijos de empresa & No & Sí & Sí \\
+Indicadores de mes del año & No & No & Sí \\
+Observaciones & 1,254 & 1,254 & 1,254 \\
+Empresas & 20 & 20 & 20 \\
+R² & 0.428 & 0.317 (dentro) & 0.338 (dentro) \\
+\bottomrule
+\end{tabular}
+\par\vspace{2pt}{\footnotesize \textit{Nota.} Variable dependiente: ln primas netas reales (Y). Muestra: muestra modelo = 1. Errores estándar agrupados por empresa entre paréntesis, con inferencia t. El modelo (3) incluye 11 indicadores de mes del año (diciembre como base); sus coeficientes completos se conservan en estimaciones\_modelos.txt. No se incluyen efectos fijos completos de periodo porque absorberían X2 y X3. Los coeficientes se interpretan como asociaciones condicionadas por el modelo, no como efectos causales. *** p < 0.01, ** p < 0.05, * p < 0.10. Fuente: SBS (S-401) y BCRP (BCRPData). Elaboración propia.}
+\end{table}
